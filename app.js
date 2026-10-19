@@ -1,6 +1,7 @@
-import { browserMode, getQuran, getPage, pageFont, getModelStatus, prepareModel, analyzeAudio, getRecitationIndex } from './runtime.js?v=308ab7492b7e';
-import { voicePolicy, createNativeRecitation } from './lib/native-recitation.js?v=308ab7492b7e';
-import { createRecitationHaptics, describeIssue, describePhoneticIssue } from './lib/recitation-feedback.js?v=308ab7492b7e';
+import { browserMode, getQuran, getPage, pageFont, getModelStatus, prepareModel, analyzeAudio, getRecitationIndex } from './runtime.js?v=15c11438eb97';
+import { voicePolicy, createNativeRecitation } from './lib/native-recitation.js?v=15c11438eb97';
+import { createRecitationHaptics, describeIssue, describePhoneticIssue } from './lib/recitation-feedback.js?v=15c11438eb97';
+import { initPwa, rememberOfflinePage } from './pwa.js?v=15c11438eb97';
 const voice = browserMode ? voicePolicy(window, navigator) : { mode: 'model' };
 const $ = (id) => document.getElementById(id);
 const savedTheme = localStorage.getItem('quran-theme');
@@ -350,6 +351,7 @@ async function loadPage(n, { following = false, readingVersion = null } = {}) {
   savePreference('quran-recent', JSON.stringify(state.recent));
   renderPage();
   updateBookmark();
+  if (browserMode) rememberOfflinePage(n);
   if (!$('navigationPanel').classList.contains('hidden')) renderNavigation();
 }
 
@@ -676,6 +678,7 @@ async function init() {
     }, { passive: true });
     window.addEventListener('resize', fitLines);
     await loadPage(state.page);
+    if (browserMode) void initPwa({ isReading: () => state.recording || state.finishing });
     if (browserMode) {
       $('hapticsToggle').classList.add('hidden');
       $('start').disabled = voice.mode === 'unavailable';
