@@ -1,6 +1,6 @@
-import { browserMode, getQuran, getPage, pageFont, getModelStatus, prepareModel, analyzeAudio, getRecitationIndex } from './runtime.js?v=45f7fe74bbef';
-import { voicePolicy, createNativeRecitation } from './lib/native-recitation.js?v=45f7fe74bbef';
-import { createRecitationHaptics, describeIssue, describePhoneticIssue } from './lib/recitation-feedback.js?v=45f7fe74bbef';
+import { browserMode, getQuran, getPage, pageFont, getModelStatus, prepareModel, analyzeAudio, getRecitationIndex } from './runtime.js?v=308ab7492b7e';
+import { voicePolicy, createNativeRecitation } from './lib/native-recitation.js?v=308ab7492b7e';
+import { createRecitationHaptics, describeIssue, describePhoneticIssue } from './lib/recitation-feedback.js?v=308ab7492b7e';
 const voice = browserMode ? voicePolicy(window, navigator) : { mode: 'model' };
 const $ = (id) => document.getElementById(id);
 const savedTheme = localStorage.getItem('quran-theme');
@@ -429,8 +429,14 @@ async function analyzePhonetics() {
     const explanation = describePhoneticIssue(item);
     const heading = document.createElement('strong'); heading.textContent = explanation.title;
     const text = document.createElement('span'); text.lang = 'ar'; text.dir = 'rtl'; text.textContent = item.text || result.reference;
-    const detail = document.createElement('small'); detail.textContent = `${explanation.detail} Күтілгені: ${item.expected || '—'} · Танылғаны: ${item.heard || '—'}${item.rules?.length ? ` · ${item.rules.join(', ')}` : ''}`;
-    row.append(heading, text, detail); return row;
+    row.append(heading, text);
+    for (const [label, content] of [['Модель байқағаны', explanation.observation], ['Күтілгені', explanation.expected], ['Қалай қайта оқу керек', explanation.correction]]) {
+      if (!content) continue;
+      const detail = document.createElement('p'); detail.className = 'finding-explanation';
+      const caption = document.createElement('b'); caption.textContent = `${label}: `;
+      detail.append(caption, document.createTextNode(content)); row.append(detail);
+    }
+    return row;
   }));
   $('phoneticFindings').classList.remove('hidden');
   if (result.errors.length && state.haptics) { try { navigator.vibrate?.([90, 70, 90]); } catch {} }

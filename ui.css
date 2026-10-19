@@ -123,3 +123,5 @@ button:focus-visible,select:focus-visible,input:focus-visible{outline:2px solid 
 .haptics-toggle{margin-top:12px;padding:7px 11px;border:1px solid var(--edge);border-radius:20px;background:transparent;color:var(--ink);font-size:11px}.haptics-toggle[aria-pressed="true"]{border-color:var(--reading);color:var(--reading)}.haptics-toggle:disabled{color:var(--muted)}
 @keyframes feedback-in{from{opacity:0;translate:0 5px}to{opacity:1;translate:0 0}}
 @media(prefers-reduced-motion:reduce){.reading-feedback{animation:none}.qword.reading-current{transition:none}}
+.phonetic-finding .finding-explanation{margin:0;font-size:11px;line-height:1.6;color:var(--ink);overflow-wrap:anywhere}
+.finding-explanation b{font-weight:600}
