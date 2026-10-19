@@ -1,12 +1,12 @@
-import { browserMode, getQuran, getPage, pageFont, getModelStatus, prepareModel, analyzeAudio } from './runtime.js?v=d50c1db25cce';
-import { voicePolicy, createNativeRecitation } from './lib/native-recitation.js?v=d50c1db25cce';
+import { browserMode, getQuran, getPage, pageFont, getModelStatus, prepareModel, analyzeAudio } from './runtime.js?v=dbd036aa100e';
+import { voicePolicy, createNativeRecitation } from './lib/native-recitation.js?v=dbd036aa100e';
 const voice = browserMode ? voicePolicy(window, navigator) : { mode: 'model' };
 const $ = (id) => document.getElementById(id);
 const savedTheme = localStorage.getItem('quran-theme');
 const state = {
   chapters: [], structure: [], page: Math.min(604, Math.max(1, Number(new URLSearchParams(location.search).get('page')) || Number(localStorage.getItem('quran-page')) || 1)),
   pageData: null, words: [], hide: localStorage.getItem('quran-hide') === 'true',
-  confirmed: 0, blocked: false, modelReady: false, recording: false, chunks: [], sampleCount: 0,
+  confirmed: 0, revealedWords: new Set(), blocked: false, modelReady: false, recording: false, chunks: [], sampleCount: 0,
   stream: null, context: null, source: null, processor: null, timer: null, started: 0, inflight: null, lastCheck: 0,
   loadedFonts: new Map(), nativeSession: null, nativeError: false,
   pageRequest: 0,
@@ -73,6 +73,7 @@ function renderNavigation() {
   }
 }
 function setReadStatus(text, type = '') { $('recordingStatus').textContent = text; $('recordingStatus').className = `read-status ${type}`; }
+function showVoiceNotice(text) { $('voiceNoticeText').textContent = text; $('voiceNotice').classList.remove('hidden'); }
 function arabicNumber(n) { return Number(n).toLocaleString('ar-EG'); }
 function verseKey(s, a) { return `${s}:${a}`; }
 function hasArabicLetters(text) { return /[\u0621-\u064A]/.test(text); }
@@ -122,7 +123,7 @@ function updateReveal() {
   $('hideToggle').setAttribute('aria-pressed', String(state.hide));
   document.querySelectorAll('.qword').forEach((el) => {
     const index = Number(el.dataset.index);
-    el.classList.toggle('revealed', index < state.confirmed);
+    el.classList.toggle('revealed', state.revealedWords.has(index));
     el.classList.toggle('blocked', state.hide && state.blocked && index === state.confirmed);
   });
 }
@@ -301,6 +302,8 @@ async function loadPage(n) {
   state.pageData = pageData;
   state.page = n;
   state.confirmed = 0;
+  state.revealedWords.clear();
+  $('voiceNotice').classList.add('hidden');
   state.blocked = false;
   $('errorCount').textContent = '0';
   $('errorMessage').textContent = 'Оқуды бастағанда ықтимал қателер осында шығады.';
@@ -323,16 +326,18 @@ function applyResult(result) {
   if (result.quiet) return;
   const progress = result.progress;
   const previous = state.confirmed;
+  const end = progress.confirmedGlyphs ?? progress.confirmed;
+  if (!progress.waitingForStart) for (let i = progress.revealedFrom ?? 0; i < end; i++) state.revealedWords.add(i);
   state.confirmed = Math.max(state.confirmed, progress.confirmedGlyphs ?? progress.confirmed);
   state.blocked = state.confirmed < state.words.length && (progress.confirmedGlyphs ?? progress.confirmed) >= previous && progress.blocked;
   $('errorCount').textContent = state.blocked ? '1' : '0';
   $('errorMessage').textContent = state.blocked
     ? `Осы жерде тоқтады: ${state.words[state.confirmed]?.surah}:${state.words[state.confirmed]?.ayah}. Қате болуы мүмкін; осы сөзді қайта оқыңыз.`
-    : `${state.confirmed} сөз танылды. ${state.words.length - state.confirmed} сөз қалды.`;
+    : progress.waitingForStart ? 'Оқи беріңіз: басталған аят анықталуда.' : `${state.revealedWords.size} сөз танылды. ${state.words.length - state.revealedWords.size} сөз қалды.`;
   $('transcript').textContent = result.transcript || '';
   $('phoneticFindings').classList.add('hidden');
   $('transcript').classList.remove('hidden');
-  if (state.recording) setReadStatus(state.blocked ? 'Қате болуы мүмкін · қайта оқыңыз' : `${state.confirmed} сөз ашылды`, state.blocked ? 'blocked' : 'active');
+  if (state.recording) setReadStatus(state.blocked ? 'Қате болуы мүмкін · қайта оқыңыз' : progress.waitingForStart ? 'Аят анықталуда…' : `${state.revealedWords.size} сөз ашылды`, state.blocked ? 'blocked' : 'active');
   updateReveal();
 }
 
@@ -407,6 +412,7 @@ async function startRecording(mode = 'page') {
     };
     state.source.connect(state.processor); state.processor.connect(state.context.destination);
     state.chunks = []; state.sampleCount = 0; state.confirmed = 0; state.blocked = false;
+    state.revealedWords.clear();
     state.recording = true; state.recordMode = mode; state.started = Date.now(); state.lastCheck = 0;
     $('start').classList.add('hidden'); $('stop').classList.remove('hidden'); $('surah').disabled = true;
     $('advancedPanel').classList.add('hidden'); $('errorsPanel').classList.add('hidden');
@@ -424,21 +430,24 @@ async function startRecording(mode = 'page') {
 
 function startNativeRecording() {
   if (state.recording || state.finishing || !state.pageData) return;
-  state.confirmed = 0; state.blocked = false; state.nativeError = false;
+  if (state.confirmed === state.words.length) { state.confirmed = 0; state.revealedWords.clear(); }
+  state.blocked = false; state.nativeError = false;
+  $('voiceNotice').classList.add('hidden');
   try {
     const session = createNativeRecitation({
       Recognition: voice.Recognition, page: state.pageData,
+      startGlyph: state.confirmed > 0 ? state.confirmed : null,
       onResult: applyResult,
       onStatus: (text) => setReadStatus(text, 'active'),
       onError: (error) => {
         state.nativeError = true; showError(error); $('modelStatus').textContent = error.message;
-        $('errorMessage').textContent = error.message; $('errorsPanel').classList.remove('hidden');
+        $('errorMessage').textContent = error.message; showVoiceNotice(error.message);
       },
       onEnd: () => {
         state.nativeSession = null;
         void cleanupMic().then(() => {
           $('stop').disabled = false;
-          if (!state.nativeError) setReadStatus(`Оқу аяқталды · ${state.confirmed} сөз`);
+          if (!state.nativeError) setReadStatus(`Оқу аяқталды · ${state.revealedWords.size} сөз`);
         });
       },
     });
@@ -451,7 +460,7 @@ function startNativeRecording() {
   } catch (error) {
     state.nativeError = true; showError(error); state.nativeSession = null;
     $('errorMessage').textContent = 'Дауыс қызметі ашылмады. Safari-де ашып, Siri мен микрофон/дауысты тану рұқсаттарын тексеріңіз.';
-    $('errorsPanel').classList.remove('hidden'); void cleanupMic();
+    showVoiceNotice($('errorMessage').textContent); void cleanupMic();
   }
 }
 
@@ -548,6 +557,7 @@ async function init() {
     });
     $('start').addEventListener('click', () => startRecording('page'));
     $('stop').addEventListener('click', stopRecording);
+    $('closeVoiceNotice').addEventListener('click', () => $('voiceNotice').classList.add('hidden'));
     let swipeStart = null;
     document.querySelector('.mushaf').addEventListener('touchstart', (event) => {
       if (event.touches.length === 1) swipeStart = { x: event.touches[0].clientX, y: event.touches[0].clientY };

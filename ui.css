@@ -82,6 +82,8 @@ button:focus-visible,select:focus-visible,input:focus-visible{outline:2px solid 
 .mic-button svg{width:31px;height:31px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
 .stop-button svg{fill:currentColor;stroke:none;width:25px;height:25px}
 .model-status{margin:1px auto 0;text-align:center;color:var(--muted);font-size:9px;line-height:1.2}
+.voice-notice{position:fixed;bottom:118px;left:50%;transform:translateX(-50%);z-index:7;width:min(440px,calc(100vw - 28px));display:flex;align-items:flex-start;gap:12px;padding:12px 14px;border:1px solid var(--edge);border-radius:12px;background:var(--bar);box-shadow:0 4px 20px #0002;color:var(--ink);font-size:12px;line-height:1.5}
+.voice-notice span{flex:1}.voice-notice button{flex:none;border:0;background:transparent;color:var(--muted);padding:0 2px;font-size:22px;line-height:1.1}
 .errors-panel{bottom:118px;background:var(--bar);border-color:var(--edge);color:var(--ink)}
 .advanced-label{color:var(--muted)}.advanced-select{background:var(--panel);color:var(--ink)}
 .advanced-start{background:var(--accent);color:#fff}
