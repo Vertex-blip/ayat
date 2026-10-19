@@ -1,15 +1,17 @@
-import { browserMode, getQuran, getPage, pageFont, getModelStatus, prepareModel, analyzeAudio } from './runtime.js?v=dbd036aa100e';
-import { voicePolicy, createNativeRecitation } from './lib/native-recitation.js?v=dbd036aa100e';
+import { browserMode, getQuran, getPage, pageFont, getModelStatus, prepareModel, analyzeAudio, getRecitationIndex } from './runtime.js?v=8e86ad911261';
+import { voicePolicy, createNativeRecitation } from './lib/native-recitation.js?v=8e86ad911261';
 const voice = browserMode ? voicePolicy(window, navigator) : { mode: 'model' };
 const $ = (id) => document.getElementById(id);
 const savedTheme = localStorage.getItem('quran-theme');
 const state = {
   chapters: [], structure: [], page: Math.min(604, Math.max(1, Number(new URLSearchParams(location.search).get('page')) || Number(localStorage.getItem('quran-page')) || 1)),
   pageData: null, words: [], hide: localStorage.getItem('quran-hide') === 'true',
-  confirmed: 0, revealedWords: new Set(), blocked: false, modelReady: false, recording: false, chunks: [], sampleCount: 0,
+  confirmed: 0, revealedWords: new Set(), uncertainWords: new Set(), revealedPages: new Map(), readingVersion: 0, queuedResult: null, applyingResult: false,
+  blocked: false, modelReady: false, recording: false, chunks: [], sampleCount: 0,
   stream: null, context: null, source: null, processor: null, timer: null, started: 0, inflight: null, lastCheck: 0,
   loadedFonts: new Map(), nativeSession: null, nativeError: false,
   pageRequest: 0,
+  modelFollower: null,
   recordMode: 'page', advancedVerse: null, finishing: false,
   navTab: 'surah',
   bookmarks: JSON.parse(localStorage.getItem('quran-bookmarks') || '[]'),
@@ -125,6 +127,7 @@ function updateReveal() {
     const index = Number(el.dataset.index);
     el.classList.toggle('revealed', state.revealedWords.has(index));
     el.classList.toggle('blocked', state.hide && state.blocked && index === state.confirmed);
+    el.classList.toggle('uncertain', state.uncertainWords.has(index) && !state.revealedWords.has(index));
   });
 }
 
@@ -283,8 +286,9 @@ function renderQpcPage(page) {
   requestAnimationFrame(() => { document.fonts.load(`40px QPC${page.page}`).then(fitLines); });
 }
 
-async function loadPage(n) {
-  if (state.recording || state.finishing || !Number.isInteger(n) || n < 1 || n > 604) return;
+async function loadPage(n, { following = false, readingVersion = null } = {}) {
+  if ((!following && (state.recording || state.finishing)) || !Number.isInteger(n) || n < 1 || n > 604) return;
+  if (!following) state.readingVersion++;
   const requestId = ++state.pageRequest;
   const pageData = await getPage(n);
   if (pageData.lines.some((line) => line.type === 'ayah')) {
@@ -299,10 +303,12 @@ async function loadPage(n) {
     }
   }
   if (requestId !== state.pageRequest) return;
+  if (following && readingVersion !== state.readingVersion) return;
   state.pageData = pageData;
   state.page = n;
   state.confirmed = 0;
-  state.revealedWords.clear();
+  state.revealedWords = following ? new Set(state.revealedPages.get(n) || []) : new Set();
+  state.uncertainWords.clear();
   $('voiceNotice').classList.add('hidden');
   state.blocked = false;
   $('errorCount').textContent = '0';
@@ -322,22 +328,48 @@ async function loadPage(n) {
   if (!$('navigationPanel').classList.contains('hidden')) renderNavigation();
 }
 
+async function queueNativeResult(result, version) {
+  if (version !== state.readingVersion) return;
+  state.queuedResult = { result, version };
+  if (state.applyingResult) return;
+  state.applyingResult = true;
+  try {
+    while (state.queuedResult) {
+      const item = state.queuedResult; state.queuedResult = null;
+      if (item.version !== state.readingVersion) continue;
+      if (item.result.page && item.result.page !== state.page && !item.result.progress.waitingForStart) {
+        state.revealedPages.set(state.page, new Set(state.revealedWords));
+        setReadStatus('Оқылған бет ашылуда…', 'active');
+        await loadPage(item.result.page, { following: true, readingVersion: item.version });
+      }
+      if (item.version === state.readingVersion && (!item.result.page || item.result.page === state.page)) applyResult(item.result);
+    }
+  } catch (error) { showVoiceNotice(`Бет ашылмады: ${error.message}`); }
+  finally { state.applyingResult = false; }
+}
+
 function applyResult(result) {
   if (result.quiet) return;
   const progress = result.progress;
   const previous = state.confirmed;
   const end = progress.confirmedGlyphs ?? progress.confirmed;
-  if (!progress.waitingForStart) for (let i = progress.revealedFrom ?? 0; i < end; i++) state.revealedWords.add(i);
+  if (progress.matchedGlyphs) {
+    for (const i of progress.matchedGlyphs) state.revealedWords.add(i);
+    state.uncertainWords = new Set((progress.uncertainGlyphs || []).filter(i => !state.revealedWords.has(i)));
+  } else if (!progress.waitingForStart) for (let i = progress.revealedFrom ?? 0; i < end; i++) state.revealedWords.add(i);
   state.confirmed = Math.max(state.confirmed, progress.confirmedGlyphs ?? progress.confirmed);
   state.blocked = state.confirmed < state.words.length && (progress.confirmedGlyphs ?? progress.confirmed) >= previous && progress.blocked;
-  $('errorCount').textContent = state.blocked ? '1' : '0';
-  $('errorMessage').textContent = state.blocked
+  state.revealedPages.set(state.page, new Set(state.revealedWords));
+  $('errorCount').textContent = state.uncertainWords.size ? String(state.uncertainWords.size) : state.blocked ? '1' : '0';
+  $('errorMessage').textContent = state.uncertainWords.size
+    ? `${state.revealedWords.size} сөз танылды. ${state.uncertainWords.size} сөз анық танылмады — белгіленген жерді қайта оқыңыз.`
+    : state.blocked
     ? `Осы жерде тоқтады: ${state.words[state.confirmed]?.surah}:${state.words[state.confirmed]?.ayah}. Қате болуы мүмкін; осы сөзді қайта оқыңыз.`
     : progress.waitingForStart ? 'Оқи беріңіз: басталған аят анықталуда.' : `${state.revealedWords.size} сөз танылды. ${state.words.length - state.revealedWords.size} сөз қалды.`;
   $('transcript').textContent = result.transcript || '';
   $('phoneticFindings').classList.add('hidden');
   $('transcript').classList.remove('hidden');
-  if (state.recording) setReadStatus(state.blocked ? 'Қате болуы мүмкін · қайта оқыңыз' : progress.waitingForStart ? 'Аят анықталуда…' : `${state.revealedWords.size} сөз ашылды`, state.blocked ? 'blocked' : 'active');
+  if (state.recording) setReadStatus(progress.waitingForStart ? 'Құраннан ізделуде…' : `${state.revealedWords.size} сөз ашылды`, 'active');
   updateReveal();
 }
 
@@ -381,8 +413,18 @@ async function analyze(final = false) {
   if (!state.context || state.sampleCount < state.context.sampleRate / 2) return;
   const audio = audioBuffer();
   const result = await analyzeAudio({ page: state.pageData, audio, sampleRate: state.context.sampleRate, final });
-  applyResult(result);
+  if (!result.quiet && state.modelFollower) {
+    const follower = await state.modelFollower;
+    if (follower) await queueNativeResult({ ...result, ...follower.update(result.transcript, { final }) }, state.readingVersion);
+    else applyResult(result);
+  } else applyResult(result);
   if (final) setReadStatus(result.quiet ? 'Дауыс анық естілмеді' : `Оқу аяқталды · ${state.confirmed} сөз`);
+}
+
+async function makeFollower(page, startGlyph = null) {
+  const index = await getRecitationIndex();
+  const { createQuranFollower } = await import(`./lib/recitation-follow.js?v=${window.QURAN_CONFIG?.version || 'local'}`);
+  return createQuranFollower(index, { page, startGlyph });
 }
 
 async function startRecording(mode = 'page') {
@@ -413,6 +455,9 @@ async function startRecording(mode = 'page') {
     state.source.connect(state.processor); state.processor.connect(state.context.destination);
     state.chunks = []; state.sampleCount = 0; state.confirmed = 0; state.blocked = false;
     state.revealedWords.clear();
+    state.uncertainWords.clear();
+    state.readingVersion++;
+    state.modelFollower = makeFollower(state.page).catch(() => null);
     state.recording = true; state.recordMode = mode; state.started = Date.now(); state.lastCheck = 0;
     $('start').classList.add('hidden'); $('stop').classList.remove('hidden'); $('surah').disabled = true;
     $('advancedPanel').classList.add('hidden'); $('errorsPanel').classList.add('hidden');
@@ -432,12 +477,17 @@ function startNativeRecording() {
   if (state.recording || state.finishing || !state.pageData) return;
   if (state.confirmed === state.words.length) { state.confirmed = 0; state.revealedWords.clear(); }
   state.blocked = false; state.nativeError = false;
+  state.readingVersion++;
+  const version = state.readingVersion;
+  const sourcePage = state.page;
+  const sourceGlyph = state.confirmed > 0 ? state.confirmed : null;
   $('voiceNotice').classList.add('hidden');
   try {
     const session = createNativeRecitation({
       Recognition: voice.Recognition, page: state.pageData,
       startGlyph: state.confirmed > 0 ? state.confirmed : null,
-      onResult: applyResult,
+      createFollower: () => makeFollower(sourcePage, sourceGlyph),
+      onResult: result => { void queueNativeResult(result, version); },
       onStatus: (text) => setReadStatus(text, 'active'),
       onError: (error) => {
         state.nativeError = true; showError(error); $('modelStatus').textContent = error.message;

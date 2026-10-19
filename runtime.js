@@ -4,6 +4,7 @@ let worker;
 let requestId = 0;
 let modelStatus = { status: 'idle', progress: 0 };
 const pending = new Map();
+let recitationIndex;
 
 async function json(url, options) {
   const response = await fetch(url, options);
@@ -14,6 +15,16 @@ async function json(url, options) {
 
 export function getQuran() { return json(browserMode ? './data/quran.json' : '/api/quran'); }
 export function getPage(n) { return json(browserMode ? `./data/pages/${n}.json` : `/api/page?n=${n}`); }
+export async function getRecitationIndex() {
+  if (!recitationIndex) recitationIndex = Promise.all([
+    json(browserMode ? './data/recitation.json' : '/api/recitation'),
+    import(`./lib/recitation-follow.js?v=${config.version || 'local'}`),
+  ]).then(([corpus, { createRecitationIndex }]) => {
+    if (!corpus.length) throw new Error('Толық Құранның бет дерегі орнатылмаған');
+    return createRecitationIndex(corpus);
+  }).catch(error => { recitationIndex = null; throw error; });
+  return recitationIndex;
+}
 export function pageFont(n) {
   return browserMode ? `${config.fontBase}/qpcv4/p${n}.woff2` : `/qpc-fonts/p${n}.woff2`;
 }

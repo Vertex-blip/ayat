@@ -60,6 +60,8 @@ button:focus-visible,select:focus-visible,input:focus-visible{outline:2px solid 
 .hidden-verses.qpc-lines .qpc-line{border-bottom:1px solid var(--edge)}
 .hidden-verses.qpc-lines .qword:not(.revealed){opacity:0}
 .hidden-verses.qpc-lines .qword.revealed{opacity:1}
+.hidden-verses.qpc-lines .qword.uncertain:not(.revealed){opacity:1;visibility:hidden;position:relative;filter:none!important}
+.hidden-verses.qpc-lines .qword.uncertain:not(.revealed)::after{content:"";visibility:visible;position:absolute;bottom:-4px;left:0;right:0;border-bottom:2px dashed var(--error);height:4px}
 .qword.blocked{border-bottom:2px solid var(--error)}
 .mushaf-foot,.source-note{display:none}
 .dock{position:relative;z-index:5;flex:none;height:108px;min-height:108px;padding:7px 18px max(8px,env(safe-area-inset-bottom));background:var(--bar);border-top:1px solid var(--edge)}
