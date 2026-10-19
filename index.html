@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="kk" data-theme="light">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#f5f5f5">
+  <title>Ayat · Құран оқу</title>
+  <meta name="description" content="604 беттік Құран. Оқыңыз, жаттаңыз және оқуыңызды дауыспен тексеріңіз.">
+  <link rel="stylesheet" href="./styles.css">
+  <link rel="stylesheet" href="./ui.css">
+</head>
+<body>
+  <div class="app">
+    <header class="topbar">
+      <button id="menuToggle" class="icon-button" type="button" title="Бет таңдау" aria-label="Бет таңдау" aria-expanded="false"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h18M3 12h18M3 18h18"/></svg></button>
+      <div class="location" title="Сүрені және бетті таңдаңыз">
+        <button id="bookmarkToggle" class="bookmark-button" type="button" title="Осы бетті белгілеу" aria-label="Осы бетті белгілеу" aria-pressed="false"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3h12v18l-6-4-6 4V3Z"/></svg></button>
+        <label class="sr-only" for="surah">Сүре</label><select id="surah" aria-label="Сүре таңдау"></select>
+        <span class="page-meta"><span>Бет </span><input id="pageJump" type="number" min="1" max="604" value="542" aria-label="Бет нөміріне өту"><span id="pageMeta"> · 28 жүз · 55 хизб</span></span>
+      </div>
+      <div class="top-actions">
+        <button id="searchToggle" class="icon-button" type="button" title="Бетке өту" aria-label="Бетке өту"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.8" cy="10.8" r="6.8"/><path d="m16 16 5 5"/></svg></button>
+        <button id="themeToggle" class="icon-button" type="button" title="Қара тақырыпқа ауысу" aria-label="Қара тақырыпқа ауысу"><svg class="moon-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M20.5 15.5A8.5 8.5 0 0 1 8.5 3.5 8.5 8.5 0 1 0 20.5 15.5Z"/></svg><svg class="sun-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3.7"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4m11.4 11.4 1.4 1.4M2 12h2m16 0h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg></button>
+      </div>
+    </header>
+    <div id="navigationPanel" class="navigation-panel hidden" role="dialog" aria-modal="false" aria-label="Құраннан бет таңдау">
+      <div class="nav-head"><button id="navClose" class="icon-button" type="button" aria-label="Жабу"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m15 4-8 8 8 8"/></svg></button><strong>Құраннан таңдау</strong></div>
+      <div class="nav-search"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.8" cy="10.8" r="6.8"/><path d="m16 16 5 5"/></svg><input id="navSearch" type="search" placeholder="Сүре немесе бет нөмірі" aria-label="Сүре немесе бет нөмірі"></div>
+      <div id="navRecent" class="nav-recent"></div>
+      <div class="nav-tabs"><button type="button" data-tab="surah" class="selected">Сүрелер</button><button type="button" data-tab="juz">Жүздер</button><button type="button" data-tab="bookmarks">Белгілер</button></div>
+      <div id="navList" class="nav-list"></div>
+    </div>
+    <main class="reader-shell">
+      <section class="mushaf" aria-label="Құран беті">
+        <div class="mushaf-head"><span class="ornament">۞</span><span id="headerSurah">سُورَةُ الْفَاتِحَةِ</span><span class="ornament">۞</span></div>
+        <div id="mushafLines" class="mushaf-lines" lang="ar" dir="rtl"></div>
+        <div class="mushaf-foot"><span id="footSurah">الفاتحة</span><span id="footPage">١</span><span>القرآن الكريم</span></div>
+      </section>
+      <div class="source-note">Баспа мәтіні мен қаріптері: <a href="https://github.com/hussainsajib/qpc-v4-mushaf-bundle" target="_blank" rel="noopener">QUL / QPC V4</a> · Салыстырма мәтін: <a href="https://tanzil.net/" target="_blank" rel="noopener">Tanzil</a></div>
+    </main>
+    <footer class="dock">
+      <div class="dock-inner">
+        <div class="dock-tools">
+          <button id="errorsToggle" class="quiet-button" type="button">Қателер <span id="errorCount">0</span></button>
+          <button id="advancedToggle" class="tool-button" type="button" title="Харакат пен тәжуидті тексеру" aria-label="Харакат пен тәжуидті тексеру" disabled><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 20c-2.1-1.5-4.7-2.1-8.2-1.8V4.3c3.5-.3 6.2.3 8.2 1.8 2-1.5 4.7-2.1 8.2-1.8v13.9c-3.5-.3-6.1.3-8.2 1.8Z"/><path d="M12 6.1V20"/></svg></button>
+          <button id="hideToggle" class="tool-button" type="button" title="Аяттарды жасыру" aria-label="Аяттарды жасыру" aria-pressed="false"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 3 21 21M10.4 5.2A11 11 0 0 1 12 5c6 0 10 7 10 7a14 14 0 0 1-3.2 3.5M6 6.4C3.5 8.1 2 12 2 12s4 7 10 7c1.7 0 3.3-.5 4.6-1.3M9.2 9.2a4 4 0 0 0 5.6 5.6"/></svg></button>
+          <div class="page-nav"><button id="prev" type="button" aria-label="Алдыңғы бет"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m14.5 5-7 7 7 7"/></svg></button><span id="pageNumber">1</span><button id="next" type="button" aria-label="Келесі бет"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9.5 5 7 7-7 7"/></svg></button></div>
+        </div>
+        <div class="mic-wrap"><div id="recordingStatus" class="read-status" role="status">Микрофон өшірулі</div><button id="start" class="mic-button" type="button" aria-label="Оқуды бастау" disabled><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="2" width="6" height="12" rx="3"/><path d="M5 10a7 7 0 0 0 14 0M12 17v5m-4 0h8"/></svg></button><button id="stop" class="mic-button stop-button hidden" type="button" aria-label="Оқуды аяқтау"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="7" y="7" width="10" height="10" rx="1.5"/></svg></button></div>
+      </div>
+      <div id="modelStatus" class="model-status">Дауыс моделі дайындалуда…</div>
+    </footer>
+    <div id="errorsPanel" class="errors-panel hidden" role="dialog" aria-modal="false" aria-label="Оқу нәтижесі">
+      <div class="errors-head"><strong>Оқу нәтижесі</strong><button id="closeErrors" type="button" aria-label="Жабу">×</button></div>
+      <div id="errorMessage" class="error-message">Оқуды бастағанда ықтимал қателер осында шығады.</div>
+      <div id="transcript" class="transcript" dir="rtl" lang="ar"></div>
+      <div id="phoneticFindings" class="phonetic-findings hidden"></div>
+      <p class="panel-note">Дауысты тану қателесуі мүмкін. Харакат пен тәжуид бұл режимде дәл тексерілмейді.</p>
+    </div>
+    <div id="advancedPanel" class="errors-panel hidden" role="dialog" aria-modal="false" aria-label="Аяттың дыбысын терең тексеру">
+      <div class="errors-head"><strong>Аятты терең тексеру</strong><button id="closeAdvanced" type="button" aria-label="Жабу">×</button></div>
+      <label class="advanced-label" for="advancedAyah">Осы беттегі толық аят</label>
+      <select id="advancedAyah" class="advanced-select"></select>
+      <p class="advanced-help">Таңдалған аятты ғана оқыңыз. Дыбыс, харакат және тәжуид бойынша ықтимал қателер жазба аяқталған соң көрсетіледі. Алғашқы тексеруде үлкен тегін модель жүктеледі.</p>
+      <button id="startAdvanced" class="advanced-start" type="button">Аятты оқуды бастау</button>
+    </div>
+  </div>
+  <script src="./config.js"></script>
+  <script type="module" src="./app.js"></script>
+</body>
+</html>
