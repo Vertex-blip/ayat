@@ -1,4 +1,6 @@
-import { browserMode, getQuran, getPage, pageFont, getModelStatus, prepareModel, analyzeAudio } from './runtime.js';
+import { browserMode, getQuran, getPage, pageFont, getModelStatus, prepareModel, analyzeAudio } from './runtime.js?v=d50c1db25cce';
+import { voicePolicy, createNativeRecitation } from './lib/native-recitation.js?v=d50c1db25cce';
+const voice = browserMode ? voicePolicy(window, navigator) : { mode: 'model' };
 const $ = (id) => document.getElementById(id);
 const savedTheme = localStorage.getItem('quran-theme');
 const state = {
@@ -6,7 +8,7 @@ const state = {
   pageData: null, words: [], hide: localStorage.getItem('quran-hide') === 'true',
   confirmed: 0, blocked: false, modelReady: false, recording: false, chunks: [], sampleCount: 0,
   stream: null, context: null, source: null, processor: null, timer: null, started: 0, inflight: null, lastCheck: 0,
-  loadedFonts: new Set(),
+  loadedFonts: new Map(), nativeSession: null, nativeError: false,
   pageRequest: 0,
   recordMode: 'page', advancedVerse: null, finishing: false,
   navTab: 'surah',
@@ -39,7 +41,7 @@ function renderNavigation() {
   }
   $('navigationPanel').querySelectorAll('.nav-tabs button').forEach((button) => button.classList.toggle('selected', button.dataset.tab === state.navTab));
   const items = state.navTab === 'surah'
-    ? state.chapters.map((chapter) => ({ number: chapter.id, title: chapter.name, detail: chapter.transliteration, page: chapter.start_page }))
+    ? state.chapters.map((chapter) => ({ number: chapter.id, surah: chapter.id, title: chapter.name, detail: chapter.transliteration, page: chapter.start_page }))
     : state.navTab === 'juz'
       ? [...new Set(state.structure.map((entry) => entry.juz))].map((juz) => ({ number: juz, title: `${juz}-жүз`, detail: 'Құран бөлімі', page: state.structure.find((entry) => entry.juz === juz).page }))
       : state.bookmarks.map((page) => ({ number: page, title: `${page}-бет`, detail: 'Сақталған белгі', page }));
@@ -58,6 +60,11 @@ function renderNavigation() {
     const number = document.createElement('span'); number.className = 'nav-index'; number.textContent = item.number;
     const names = document.createElement('span'); names.className = 'nav-names';
     const title = document.createElement('strong'); title.textContent = item.title;
+    if (item.surah) {
+      title.className = 'nav-surah-name'; title.lang = 'ar';
+      title.setAttribute('aria-label', item.title);
+      setSurahName(title, item.surah);
+    }
     const detail = document.createElement('small'); detail.textContent = item.detail;
     const page = document.createElement('span'); page.className = 'nav-page'; page.textContent = `${item.page}-бет`;
     names.append(title, detail); button.append(number, names, page);
@@ -130,6 +137,29 @@ function updateAdvancedVerses(page) {
   }));
   $('advancedToggle').disabled = (!browserMode && !verses.length) || state.recording;
   $('advancedPanel').classList.add('hidden');
+}
+
+function setSurahName(element, surah) {
+  element.dir = 'ltr';
+  const label = document.createElement('span'); label.className = 'surah-prefix'; label.textContent = '\uE000';
+  const name = document.createElement('span'); name.className = 'surah-name'; name.textContent = String.fromCodePoint(0xE000 + surah);
+  element.replaceChildren(label, name);
+}
+
+function surahBanner(surah) {
+  const banner = document.createElement('div');
+  banner.className = 'mushaf-line qpc-surah surah-banner';
+  banner.dataset.surah = String(surah);
+  banner.setAttribute('aria-label', `سُورَةُ ${state.chapters[surah - 1]?.name || ''}`);
+  const name = document.createElement('span');
+  name.className = 'surah-banner-name';
+  setSurahName(name, surah);
+  const frame = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  frame.setAttribute('viewBox', '0 0 720 50'); frame.setAttribute('preserveAspectRatio', 'none');
+  frame.setAttribute('aria-hidden', 'true'); frame.classList.add('surah-banner-frame');
+  frame.innerHTML = '<rect x="2" y="2" width="716" height="46"/><rect x="6" y="6" width="708" height="38"/><path d="M120 6C111 15 111 35 120 44M600 6C609 15 609 35 600 44"/><g id="flourish"><path d="M12 25C28 5 45 5 61 25C45 45 28 45 12 25ZM21 25C35 13 45 14 51 25C41 35 31 35 21 25ZM65 6C43 8 49 22 67 25C49 28 43 42 65 44M67 25C90 6 107 13 99 25C107 37 90 44 67 25ZM72 25C85 15 93 18 89 25C93 32 85 35 72 25Z"/></g><g transform="translate(720 0) scale(-1 1)"><path d="M12 25C28 5 45 5 61 25C45 45 28 45 12 25ZM21 25C35 13 45 14 51 25C41 35 31 35 21 25ZM65 6C43 8 49 22 67 25C49 28 43 42 65 44M67 25C90 6 107 13 99 25C107 37 90 44 67 25ZM72 25C85 15 93 18 89 25C93 32 85 35 72 25Z"/></g>';
+  banner.append(frame, name);
+  return banner;
 }
 
 function renderPage() {
@@ -208,14 +238,10 @@ function renderQpcPage(page) {
   state.words = [];
   const firstWord = page.lines.find((line) => line.type === 'ayah')?.words.find((word) => !word.marker);
   let headerSurah = firstWord?.surah || 1;
-  const startsSurah = page.lines[0]?.type === 'surah_name';
-  for (const [index, line] of page.lines.entries()) {
+  for (const line of page.lines) {
     if (line.type === 'surah_name') {
       const surah = line.surah || headerSurah;
-      if (index === 0) { headerSurah = surah; continue; }
-      const div = document.createElement('div'); div.className = 'mushaf-line qpc-surah';
-      div.textContent = String.fromCodePoint(0xE000, 0xE000 + surah);
-      lines.append(div); continue;
+      lines.append(surahBanner(surah)); continue;
     }
     if (line.type === 'basmallah') {
       const div = document.createElement('div'); div.className = 'mushaf-line qpc-basmala';
@@ -242,7 +268,7 @@ function renderQpcPage(page) {
   const surah = state.chapters[headerSurah - 1];
   $('headerSurah').textContent = String.fromCodePoint(0xE000, 0xE000 + headerSurah);
   $('headerSurah').classList.add('qpc-header-title');
-  document.querySelector('.mushaf-head').classList.toggle('hidden', !startsSurah);
+  document.querySelector('.mushaf-head').classList.add('hidden');
   $('footSurah').textContent = surah?.name || '';
   $('pageNumber').textContent = String(state.page);
   $('pageJump').value = String(state.page);
@@ -264,7 +290,11 @@ async function loadPage(n) {
     const family = `QPC${n}`;
     if (!state.loadedFonts.has(n)) {
       const font = new FontFace(family, `url('${pageFont(n)}')`, { display: 'swap' });
-      await font.load(); document.fonts.add(font); state.loadedFonts.add(n);
+      await font.load(); document.fonts.add(font); state.loadedFonts.set(n, font);
+      while (state.loadedFonts.size > 8) {
+        const oldest = state.loadedFonts.keys().next().value;
+        document.fonts.delete(state.loadedFonts.get(oldest)); state.loadedFonts.delete(oldest);
+      }
     }
   }
   if (requestId !== state.pageRequest) return;
@@ -278,7 +308,9 @@ async function loadPage(n) {
   $('phoneticFindings').replaceChildren();
   $('phoneticFindings').classList.add('hidden');
   $('transcript').classList.remove('hidden');
-  document.querySelector('.panel-note').textContent = 'Дауысты тану қателесуі мүмкін. Харакат пен тәжуид бұл режимде дәл тексерілмейді.';
+  document.querySelector('.panel-note').textContent = voice.mode === 'native'
+    ? 'Телефонның дауыс қызметі аудионы сыртқы серверде өңдеуі мүмкін. Бұл режим сөздерді салыстырады; харакат пен тәжуидті бағаламайды.'
+    : 'Дауысты тану қателесуі мүмкін. Харакат пен тәжуид бұл режимде дәл тексерілмейді.';
   savePreference('quran-page', n);
   state.recent = [n, ...state.recent.filter((page) => page !== n)].slice(0, 8);
   savePreference('quran-recent', JSON.stringify(state.recent));
@@ -349,6 +381,8 @@ async function analyze(final = false) {
 }
 
 async function startRecording(mode = 'page') {
+  if (voice.mode === 'unavailable' && mode === 'page') return;
+  if (voice.mode === 'native' && mode === 'page') { startNativeRecording(); return; }
   if (browserMode && !state.modelReady && mode === 'page') {
     $('start').disabled = true;
     const preparation = prepareModel();
@@ -388,6 +422,39 @@ async function startRecording(mode = 'page') {
   } catch (error) { showError(error); await cleanupMic(); }
 }
 
+function startNativeRecording() {
+  if (state.recording || state.finishing || !state.pageData) return;
+  state.confirmed = 0; state.blocked = false; state.nativeError = false;
+  try {
+    const session = createNativeRecitation({
+      Recognition: voice.Recognition, page: state.pageData,
+      onResult: applyResult,
+      onStatus: (text) => setReadStatus(text, 'active'),
+      onError: (error) => {
+        state.nativeError = true; showError(error); $('modelStatus').textContent = error.message;
+        $('errorMessage').textContent = error.message; $('errorsPanel').classList.remove('hidden');
+      },
+      onEnd: () => {
+        state.nativeSession = null;
+        void cleanupMic().then(() => {
+          $('stop').disabled = false;
+          if (!state.nativeError) setReadStatus(`Оқу аяқталды · ${state.confirmed} сөз`);
+        });
+      },
+    });
+    state.nativeSession = session; state.recordMode = 'native'; state.recording = true;
+    session.start();
+    $('start').classList.add('hidden'); $('stop').classList.remove('hidden'); $('surah').disabled = true;
+    $('errorsPanel').classList.add('hidden'); $('advancedPanel').classList.add('hidden');
+    renderPage(); setReadStatus('Микрофонға рұқсат беріңіз…', 'active');
+    $('modelStatus').textContent = 'Телефонның дауыс қызметі · аудио серверде өңделуі мүмкін';
+  } catch (error) {
+    state.nativeError = true; showError(error); state.nativeSession = null;
+    $('errorMessage').textContent = 'Дауыс қызметі ашылмады. Safari-де ашып, Siri мен микрофон/дауысты тану рұқсаттарын тексеріңіз.';
+    $('errorsPanel').classList.remove('hidden'); void cleanupMic();
+  }
+}
+
 async function cleanupMic() {
   if (state.timer) clearInterval(state.timer);
   state.timer = null; state.recording = false; state.finishing = false;
@@ -401,6 +468,10 @@ async function cleanupMic() {
 
 async function stopRecording() {
   if (!state.recording) return;
+  if (state.recordMode === 'native') {
+    state.finishing = true; $('stop').disabled = true;
+    state.nativeSession?.stop(); return;
+  }
   state.recording = false; state.finishing = true;
   clearInterval(state.timer); state.timer = null;
   state.processor?.disconnect(); state.source?.disconnect();
@@ -487,13 +558,16 @@ async function init() {
       const dy = event.changedTouches[0].clientY - swipeStart.y;
       swipeStart = null;
       if (Math.abs(dx) < 55 || Math.abs(dx) < Math.abs(dy) * 1.3) return;
-      void loadPage(state.page + (dx < 0 ? 1 : -1)).catch(showError);
+      void loadPage(state.page + (dx > 0 ? 1 : -1)).catch(showError);
     }, { passive: true });
     window.addEventListener('resize', fitLines);
     await loadPage(state.page);
     if (browserMode) {
-      $('start').disabled = false;
-      $('modelStatus').textContent = 'Микрофонды қосу · алғаш рет ≈300 МБ жүктеледі';
+      $('start').disabled = voice.mode === 'unavailable';
+      state.modelReady = voice.mode === 'native';
+      $('modelStatus').textContent = voice.mode === 'native'
+        ? 'Телефонның дауыс қызметі · аудио серверде өңделуі мүмкін'
+        : voice.mode === 'unavailable' ? 'Дауыс үшін сайтты Safari немесе Chrome-да ашыңыз' : 'Микрофонды қосу · алғаш рет ≈300 МБ жүктеледі';
       $('advancedAyah').classList.add('hidden');
       document.querySelector('.advanced-label').classList.add('hidden');
       $('startAdvanced').classList.add('hidden');

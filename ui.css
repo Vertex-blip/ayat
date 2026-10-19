@@ -46,6 +46,14 @@ button:focus-visible,select:focus-visible,input:focus-visible{outline:2px solid 
 :root[data-theme="dark"] .qpc-line .qword,:root[data-theme="dark"] .qpc-basmala{filter:brightness(0) invert(1)}
 :root[data-theme="dark"] .qpc-line .qpc-marker{filter:grayscale(1) invert(1)}
 .qpc-surah{font-family:QPCSurah,serif;text-align:center;font-size:1.2em;line-height:1}
+.qpc-lines .surah-banner{position:relative;flex:none;display:flex;align-items:center;justify-content:center;width:100%;height:clamp(30px,8.2vw,46px);min-height:clamp(30px,8.2vw,46px);font-size:clamp(26px,7.4vw,39px);line-height:1;direction:ltr}
+.surah-banner-frame{position:absolute;inset:0;width:100%;height:100%;fill:none;stroke:var(--ink);stroke-width:1.6;stroke-linejoin:round;pointer-events:none}
+.surah-banner-name{position:relative;display:block;font-family:QPCSurah,serif;line-height:1;white-space:nowrap;filter:brightness(0)}
+.surah-banner-name,.nav-names .nav-surah-name{display:inline-flex;flex-direction:row-reverse;align-items:center;justify-content:center;gap:.12em}
+.nav-names .nav-surah-name{align-self:flex-start}
+:root[data-theme="dark"] .surah-banner-name{filter:brightness(0) invert(1)}
+.nav-names .nav-surah-name{font-family:QPCSurah,serif;font-size:25px;line-height:1.2;filter:brightness(0)}
+:root[data-theme="dark"] .nav-names .nav-surah-name{filter:brightness(0) invert(1)}
 .qpc-basmala{display:flex;align-items:center;justify-content:center;direction:ltr;font-family:QPCBasmala,serif;font-size:1.15em;line-height:1}
 .basmala-glyph{display:inline-block;font-family:QPCBasmala,serif;direction:ltr;line-height:1}
 .qpc-lines .mushaf-line{border:0;min-height:0}
@@ -62,9 +70,10 @@ button:focus-visible,select:focus-visible,input:focus-visible{outline:2px solid 
 .tool-button{width:42px;height:42px;flex:none;display:grid;place-items:center;padding:9px;border:0;border-radius:50%;background:color-mix(in srgb,var(--ink),transparent 91%);color:var(--ink)}
 .tool-button svg{width:22px;height:22px;stroke-width:1.9}
 .tool-button.active{color:var(--accent);background:color-mix(in srgb,var(--accent),transparent 83%)}
-.page-nav{position:static;transform:none;display:flex;align-items:center;gap:0;padding:0;margin-left:3px;color:var(--muted);font-size:11px;z-index:auto}
+.page-nav{position:static;transform:none;display:flex;flex-direction:row-reverse;align-items:center;gap:0;padding:0;margin-left:3px;color:var(--muted);font-size:11px;z-index:auto}
 .page-nav button{width:37px;height:42px;display:grid;place-items:center;border:0;border-radius:22px;background:color-mix(in srgb,var(--ink),transparent 91%);color:var(--ink);padding:9px}
-.page-nav button:first-child{border-radius:22px 0 0 22px}.page-nav button:last-child{border-radius:0 22px 22px 0}
+.page-nav button:first-child{border-radius:0 22px 22px 0}.page-nav button:last-child{border-radius:22px 0 0 22px}
+.page-nav svg{transform:rotate(180deg)}
 .page-nav svg{width:18px;height:18px}.page-nav #pageNumber{display:block;min-width:28px;text-align:center;background:color-mix(in srgb,var(--ink),transparent 91%);line-height:42px}
 .mic-wrap{height:82px;flex:none;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;gap:4px}
 .read-status{max-width:140px;min-height:14px;flex:none;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--muted);text-align:center;font-size:10px}
