@@ -6,8 +6,8 @@
   <meta name="theme-color" content="#f5f5f5">
   <title>Ayat · Құран оқу</title>
   <meta name="description" content="604 беттік Құран. Оқыңыз, жаттаңыз және оқуыңызды дауыспен тексеріңіз.">
-  <link rel="stylesheet" href="./styles.css?v=8e86ad911261">
-  <link rel="stylesheet" href="./ui.css?v=8e86ad911261">
+  <link rel="stylesheet" href="./styles.css?v=45f7fe74bbef">
+  <link rel="stylesheet" href="./ui.css?v=45f7fe74bbef">
 </head>
 <body>
   <div class="app">
@@ -39,10 +39,17 @@
       <div class="source-note">Баспа мәтіні мен қаріптері: <a href="https://github.com/hussainsajib/qpc-v4-mushaf-bundle" target="_blank" rel="noopener">QUL / QPC V4</a> · Салыстырма мәтін: <a href="https://tanzil.net/" target="_blank" rel="noopener">Tanzil</a></div>
     </main>
     <div id="voiceNotice" class="voice-notice hidden" role="status"><span id="voiceNoticeText"></span><button id="closeVoiceNotice" type="button" aria-label="Жабу">×</button></div>
+    <aside id="readingFeedback" class="reading-feedback hidden" role="status" aria-live="polite" aria-atomic="true">
+      <div class="feedback-symbol" aria-hidden="true">!</div>
+      <div class="feedback-content"><div class="feedback-heading"><strong id="feedbackTitle"></strong><span id="feedbackLocation"></span></div>
+        <div class="feedback-words"><span>Күтілгені <bdi id="feedbackExpected" lang="ar" dir="rtl"></bdi></span><span>Танылғаны <bdi id="feedbackHeard" lang="ar" dir="rtl"></bdi></span></div>
+        <p id="feedbackDetail"></p>
+      </div>
+    </aside>
     <footer class="dock">
       <div class="dock-inner">
         <div class="dock-tools">
-          <button id="errorsToggle" class="quiet-button" type="button">Қателер <span id="errorCount">0</span></button>
+          <button id="errorsToggle" class="quiet-button" type="button"><span id="errorLabel">Тексеру</span> <span id="errorCount" class="hidden">0</span></button>
           <button id="advancedToggle" class="tool-button" type="button" title="Харакат пен тәжуидті тексеру" aria-label="Харакат пен тәжуидті тексеру" disabled><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 20c-2.1-1.5-4.7-2.1-8.2-1.8V4.3c3.5-.3 6.2.3 8.2 1.8 2-1.5 4.7-2.1 8.2-1.8v13.9c-3.5-.3-6.1.3-8.2 1.8Z"/><path d="M12 6.1V20"/></svg></button>
           <button id="hideToggle" class="tool-button" type="button" title="Аяттарды жасыру" aria-label="Аяттарды жасыру" aria-pressed="false"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 3 21 21M10.4 5.2A11 11 0 0 1 12 5c6 0 10 7 10 7a14 14 0 0 1-3.2 3.5M6 6.4C3.5 8.1 2 12 2 12s4 7 10 7c1.7 0 3.3-.5 4.6-1.3M9.2 9.2a4 4 0 0 0 5.6 5.6"/></svg></button>
           <div class="page-nav"><button id="prev" type="button" aria-label="Алдыңғы бет"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m14.5 5-7 7 7 7"/></svg></button><span id="pageNumber">1</span><button id="next" type="button" aria-label="Келесі бет"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9.5 5 7 7-7 7"/></svg></button></div>
@@ -53,7 +60,8 @@
     </footer>
     <div id="errorsPanel" class="errors-panel hidden" role="dialog" aria-modal="false" aria-label="Оқу нәтижесі">
       <div class="errors-head"><strong>Оқу нәтижесі</strong><button id="closeErrors" type="button" aria-label="Жабу">×</button></div>
-      <div id="errorMessage" class="error-message">Оқуды бастағанда ықтимал қателер осында шығады.</div>
+      <div id="errorMessage" class="error-message">Оқуды бастағанда танылған мәтін осында шығады.</div>
+      <button id="hapticsToggle" class="haptics-toggle" type="button" aria-pressed="true">Діріл қосулы</button>
       <div id="transcript" class="transcript" dir="rtl" lang="ar"></div>
       <div id="phoneticFindings" class="phonetic-findings hidden"></div>
       <p class="panel-note">Дауысты тану қателесуі мүмкін. Харакат пен тәжуид бұл режимде дәл тексерілмейді.</p>
@@ -66,7 +74,7 @@
       <button id="startAdvanced" class="advanced-start" type="button">Аятты оқуды бастау</button>
     </div>
   </div>
-  <script src="./config.js?v=8e86ad911261"></script>
-  <script type="module" src="./app.js?v=8e86ad911261"></script>
+  <script src="./config.js?v=45f7fe74bbef"></script>
+  <script type="module" src="./app.js?v=45f7fe74bbef"></script>
 </body>
 </html>

@@ -61,7 +61,7 @@ button:focus-visible,select:focus-visible,input:focus-visible{outline:2px solid 
 .hidden-verses.qpc-lines .qword:not(.revealed){opacity:0}
 .hidden-verses.qpc-lines .qword.revealed{opacity:1}
 .hidden-verses.qpc-lines .qword.uncertain:not(.revealed){opacity:1;visibility:hidden;position:relative;filter:none!important}
-.hidden-verses.qpc-lines .qword.uncertain:not(.revealed)::after{content:"";visibility:visible;position:absolute;bottom:-4px;left:0;right:0;border-bottom:2px dashed var(--error);height:4px}
+.hidden-verses.qpc-lines .qword.uncertain:not(.revealed)::after{content:"";visibility:visible;position:absolute;bottom:-4px;left:0;right:0;border-bottom:2px dashed var(--reading);height:4px}
 .qword.blocked{border-bottom:2px solid var(--error)}
 .mushaf-foot,.source-note{display:none}
 .dock{position:relative;z-index:5;flex:none;height:108px;min-height:108px;padding:7px 18px max(8px,env(safe-area-inset-bottom));background:var(--bar);border-top:1px solid var(--edge)}
@@ -104,3 +104,22 @@ button:focus-visible,select:focus-visible,input:focus-visible{outline:2px solid 
   .model-status{font-size:8px}
 }
 @media(max-width:380px){.dock-tools{gap:3px}.quiet-button{padding:0 7px}.tool-button{width:35px;height:38px}.page-nav button{width:27px}.page-nav #pageNumber{min-width:22px}.mic-button{width:58px;height:58px}}
+:root{--reading:#2477dd;--reading-wash:#2477dd12}
+:root[data-theme="dark"]{--reading:#79b3ff;--reading-wash:#79b3ff16}
+.qword.reading-current{color:var(--reading);background:var(--reading-wash);border-radius:4px;box-shadow:0 2px 0 var(--reading);transition:color .15s,box-shadow .15s}
+.qpc-line .qword.reading-current,.qpc-line .qword.reading-pending{background:transparent;filter:brightness(0) saturate(100%) invert(39%) sepia(98%) saturate(1840%) hue-rotate(200deg) brightness(93%) contrast(96%)!important}
+:root[data-theme="dark"] .qpc-line .qword.reading-current,:root[data-theme="dark"] .qpc-line .qword.reading-pending{filter:brightness(0) saturate(100%) invert(71%) sepia(25%) saturate(1750%) hue-rotate(183deg) brightness(105%) contrast(103%)!important}
+.mushaf-line.reading-line{background:var(--reading-wash);border-radius:5px}
+.qword.reading-pending{border-bottom:2px dashed var(--reading)}
+.quiet-button #errorLabel{margin:0;color:inherit}
+.hidden-verses.qpc-lines .qword.reading-current:not(.revealed){opacity:1;visibility:hidden;position:relative;filter:none!important;box-shadow:none}
+.hidden-verses.qpc-lines .qword.reading-current:not(.revealed)::after{content:"";visibility:visible;position:absolute;bottom:-4px;left:0;right:0;border-bottom:2px solid var(--reading)}
+.reading-feedback{position:fixed;left:50%;bottom:120px;transform:translateX(-50%);width:min(470px,calc(100vw - 28px));display:flex;align-items:flex-start;gap:11px;padding:14px 15px;background:var(--bar);border:1px solid color-mix(in srgb,var(--reading),transparent 63%);border-radius:16px;box-shadow:0 8px 32px #0002;color:var(--ink);z-index:4;animation:feedback-in .18s ease-out}
+.reading-feedback.above{top:82px;bottom:auto}
+.feedback-symbol{flex:none;display:grid;place-items:center;width:25px;height:25px;border-radius:50%;background:color-mix(in srgb,var(--reading),transparent 88%);color:var(--reading);font-size:17px;font-weight:700}
+.feedback-content{min-width:0;flex:1}.feedback-heading{display:flex;align-items:center;justify-content:space-between;gap:8px;font-size:12px}.feedback-heading strong{font-weight:650}.feedback-heading>span{color:var(--muted);font-size:10px;font-variant-numeric:tabular-nums}
+.feedback-words{display:flex;flex-wrap:wrap;gap:6px 16px;margin-top:7px;color:var(--muted);font-size:10px}.feedback-words>span{min-width:0;max-width:100%}.feedback-words bdi{display:inline-block;max-width:100%;vertical-align:middle;overflow-wrap:anywhere;font-family:'Amiri Quran','Traditional Arabic',serif;font-size:20px;color:var(--ink);margin-left:5px}
+.feedback-words>span:first-child bdi{color:var(--reading)}.feedback-content p{font-size:10px;line-height:1.5;margin:5px 0 0;color:var(--muted)}
+.haptics-toggle{margin-top:12px;padding:7px 11px;border:1px solid var(--edge);border-radius:20px;background:transparent;color:var(--ink);font-size:11px}.haptics-toggle[aria-pressed="true"]{border-color:var(--reading);color:var(--reading)}.haptics-toggle:disabled{color:var(--muted)}
+@keyframes feedback-in{from{opacity:0;translate:0 5px}to{opacity:1;translate:0 0}}
+@media(prefers-reduced-motion:reduce){.reading-feedback{animation:none}.qword.reading-current{transition:none}}

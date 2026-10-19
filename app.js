@@ -1,5 +1,6 @@
-import { browserMode, getQuran, getPage, pageFont, getModelStatus, prepareModel, analyzeAudio, getRecitationIndex } from './runtime.js?v=8e86ad911261';
-import { voicePolicy, createNativeRecitation } from './lib/native-recitation.js?v=8e86ad911261';
+import { browserMode, getQuran, getPage, pageFont, getModelStatus, prepareModel, analyzeAudio, getRecitationIndex } from './runtime.js?v=45f7fe74bbef';
+import { voicePolicy, createNativeRecitation } from './lib/native-recitation.js?v=45f7fe74bbef';
+import { createRecitationHaptics, describeIssue, describePhoneticIssue } from './lib/recitation-feedback.js?v=45f7fe74bbef';
 const voice = browserMode ? voicePolicy(window, navigator) : { mode: 'model' };
 const $ = (id) => document.getElementById(id);
 const savedTheme = localStorage.getItem('quran-theme');
@@ -7,9 +8,9 @@ const state = {
   chapters: [], structure: [], page: Math.min(604, Math.max(1, Number(new URLSearchParams(location.search).get('page')) || Number(localStorage.getItem('quran-page')) || 1)),
   pageData: null, words: [], hide: localStorage.getItem('quran-hide') === 'true',
   confirmed: 0, revealedWords: new Set(), uncertainWords: new Set(), revealedPages: new Map(), readingVersion: 0, queuedResult: null, applyingResult: false,
-  blocked: false, modelReady: false, recording: false, chunks: [], sampleCount: 0,
+  blocked: false, currentGlyph: null, pending: false, issue: null, haptics: localStorage.getItem('quran-haptics') !== 'false', modelReady: false, recording: false, chunks: [], sampleCount: 0,
   stream: null, context: null, source: null, processor: null, timer: null, started: 0, inflight: null, lastCheck: 0,
-  loadedFonts: new Map(), nativeSession: null, nativeError: false,
+  loadedFonts: new Map(), nativeSession: null, nativeError: false, pendingGlyph: null,
   pageRequest: 0,
   modelFollower: null,
   recordMode: 'page', advancedVerse: null, finishing: false,
@@ -17,6 +18,7 @@ const state = {
   bookmarks: JSON.parse(localStorage.getItem('quran-bookmarks') || '[]'),
   recent: JSON.parse(localStorage.getItem('quran-recent') || '[]'),
 };
+const haptics = createRecitationHaptics({ vibrate: pattern => navigator.vibrate?.(pattern) });
 if (savedTheme === 'light' || savedTheme === 'dark') document.documentElement.dataset.theme = savedTheme;
 
 function savePreference(name, value) { try { localStorage.setItem(name, String(value)); } catch {} }
@@ -126,9 +128,29 @@ function updateReveal() {
   document.querySelectorAll('.qword').forEach((el) => {
     const index = Number(el.dataset.index);
     el.classList.toggle('revealed', state.revealedWords.has(index));
-    el.classList.toggle('blocked', state.hide && state.blocked && index === state.confirmed);
+    el.classList.remove('blocked');
     el.classList.toggle('uncertain', state.uncertainWords.has(index) && !state.revealedWords.has(index));
+    const current = state.recording && index === state.currentGlyph;
+    el.classList.toggle('reading-current', current);
+    el.classList.toggle('reading-pending', state.recording && index === state.pendingGlyph);
+    if (current) el.setAttribute('aria-current', 'true'); else el.removeAttribute('aria-current');
   });
+  document.querySelectorAll('.mushaf-line').forEach(line => line.classList.toggle('reading-line', Boolean(line.querySelector('.reading-current'))));
+}
+
+function updateReadingFeedback() {
+  const feedback = describeIssue(state.issue);
+  $('readingFeedback').classList.toggle('hidden', !feedback || !state.recording);
+  if (feedback) {
+    $('feedbackTitle').textContent = feedback.title;
+    $('feedbackLocation').textContent = feedback.location;
+    $('feedbackExpected').textContent = feedback.expected;
+    $('feedbackHeard').textContent = feedback.heard || '—';
+    $('feedbackDetail').textContent = feedback.detail;
+    const word = document.querySelector(`.qword[data-index="${state.currentGlyph}"]`);
+    $('readingFeedback').classList.toggle('above', Boolean(word && word.getBoundingClientRect().bottom > window.innerHeight - 235));
+  }
+  haptics.update(state.issue, { enabled: state.haptics, active: state.recording });
 }
 
 function updateAdvancedVerses(page) {
@@ -311,8 +333,11 @@ async function loadPage(n, { following = false, readingVersion = null } = {}) {
   state.uncertainWords.clear();
   $('voiceNotice').classList.add('hidden');
   state.blocked = false;
+  state.currentGlyph = null; state.pendingGlyph = null; state.pending = false; state.issue = null; updateReadingFeedback();
   $('errorCount').textContent = '0';
-  $('errorMessage').textContent = 'Оқуды бастағанда ықтимал қателер осында шығады.';
+  $('errorCount').classList.add('hidden');
+  $('errorLabel').textContent = 'Тексеру';
+  $('errorMessage').textContent = 'Оқуды бастағанда танылған мәтін осында шығады.';
   $('transcript').textContent = '';
   $('phoneticFindings').replaceChildren();
   $('phoneticFindings').classList.add('hidden');
@@ -358,18 +383,27 @@ function applyResult(result) {
     state.uncertainWords = new Set((progress.uncertainGlyphs || []).filter(i => !state.revealedWords.has(i)));
   } else if (!progress.waitingForStart) for (let i = progress.revealedFrom ?? 0; i < end; i++) state.revealedWords.add(i);
   state.confirmed = Math.max(state.confirmed, progress.confirmedGlyphs ?? progress.confirmed);
-  state.blocked = state.confirmed < state.words.length && (progress.confirmedGlyphs ?? progress.confirmed) >= previous && progress.blocked;
+  state.blocked = (progress.confirmedGlyphs ?? progress.confirmed) >= previous && progress.blocked;
+  state.pending = Boolean(progress.pending);
+  state.currentGlyph = progress.lastMatchedGlyph ?? (end > 0 ? end - 1 : null);
+  state.pendingGlyph = (state.blocked || state.pending) ? (progress.currentGlyph ?? end) : null;
+  state.issue = progress.issue || null;
   state.revealedPages.set(state.page, new Set(state.revealedWords));
-  $('errorCount').textContent = state.uncertainWords.size ? String(state.uncertainWords.size) : state.blocked ? '1' : '0';
-  $('errorMessage').textContent = state.uncertainWords.size
-    ? `${state.revealedWords.size} сөз танылды. ${state.uncertainWords.size} сөз анық танылмады — белгіленген жерді қайта оқыңыз.`
+  // A transcript difference is uncertainty, never a verified reading error.
+  $('errorLabel').textContent = 'Тексеру';
+  $('errorCount').textContent = '0';
+  $('errorCount').classList.add('hidden');
+  const feedback = describeIssue(state.issue);
+  $('errorMessage').textContent = feedback ? `${feedback.title} · ${feedback.location}. Күтілгені: ${feedback.expected}. Танылғаны: ${feedback.heard || '—'}. ${feedback.detail}` : state.uncertainWords.size
+    ? 'Дауыс анық танылмады. Белгіленген сөзден қайта оқыңыз; оқу орны сақталды. Бұл оқу қатесі деп есептелмейді.'
     : state.blocked
-    ? `Осы жерде тоқтады: ${state.words[state.confirmed]?.surah}:${state.words[state.confirmed]?.ayah}. Қате болуы мүмкін; осы сөзді қайта оқыңыз.`
+    ? `Оқу орны: ${progress.blockedAt?.surah ?? state.words[state.confirmed]?.surah}:${progress.blockedAt?.ayah ?? state.words[state.confirmed]?.ayah}. Дауыс анық танылмады; асты сызылған сөзден қайта оқыңыз.`
     : progress.waitingForStart ? 'Оқи беріңіз: басталған аят анықталуда.' : `${state.revealedWords.size} сөз танылды. ${state.words.length - state.revealedWords.size} сөз қалды.`;
   $('transcript').textContent = result.transcript || '';
   $('phoneticFindings').classList.add('hidden');
   $('transcript').classList.remove('hidden');
-  if (state.recording) setReadStatus(progress.waitingForStart ? 'Құраннан ізделуде…' : `${state.revealedWords.size} сөз ашылды`, 'active');
+  if (state.recording) setReadStatus(state.blocked ? 'Сөзді нақтылап оқыңыз' : state.pending ? 'Сөз нақтылануда…' : progress.waitingForStart ? 'Құраннан ізделуде…' : `${state.revealedWords.size} сөз танылды`, 'active');
+  updateReadingFeedback();
   updateReveal();
 }
 
@@ -383,7 +417,8 @@ async function analyzePhonetics() {
   });
   const result = await response.json();
   if (!response.ok) throw new Error(result.error || `HTTP ${response.status}`);
-  const names = { normal: 'Әріп/дыбыс', tashkeel: 'Харакат', tajweed: 'Тәжуид' };
+  $('errorLabel').textContent = 'Қателер';
+  $('errorCount').classList.remove('hidden');
   $('errorCount').textContent = String(result.errors.length);
   $('errorMessage').textContent = result.errors.length
     ? `${surah}:${ayah} аятында ${result.errors.length} ықтимал дыбыстық айырмашылық табылды.`
@@ -391,12 +426,14 @@ async function analyzePhonetics() {
   $('transcript').classList.add('hidden');
   $('phoneticFindings').replaceChildren(...result.errors.map((item) => {
     const row = document.createElement('div'); row.className = 'phonetic-finding';
-    const heading = document.createElement('strong'); heading.textContent = names[item.type] || 'Дыбыс';
+    const explanation = describePhoneticIssue(item);
+    const heading = document.createElement('strong'); heading.textContent = explanation.title;
     const text = document.createElement('span'); text.lang = 'ar'; text.dir = 'rtl'; text.textContent = item.text || result.reference;
-    const detail = document.createElement('small'); detail.textContent = `Күтілгені: ${item.expected || '—'} · Танылғаны: ${item.heard || '—'}${item.rules?.length ? ` · ${item.rules.join(', ')}` : ''}`;
+    const detail = document.createElement('small'); detail.textContent = `${explanation.detail} Күтілгені: ${item.expected || '—'} · Танылғаны: ${item.heard || '—'}${item.rules?.length ? ` · ${item.rules.join(', ')}` : ''}`;
     row.append(heading, text, detail); return row;
   }));
   $('phoneticFindings').classList.remove('hidden');
+  if (result.errors.length && state.haptics) { try { navigator.vibrate?.([90, 70, 90]); } catch {} }
   document.querySelector('.panel-note').textContent = 'Бұл модель де жаңылысуы мүмкін. Харакат пен тәжуид нәтижесін ұстазбен тексеріңіз.';
   $('errorsPanel').classList.remove('hidden');
   setReadStatus(`Терең тексеру аяқталды · ${result.errors.length} ықтимал қате`);
@@ -415,7 +452,7 @@ async function analyze(final = false) {
   const result = await analyzeAudio({ page: state.pageData, audio, sampleRate: state.context.sampleRate, final });
   if (!result.quiet && state.modelFollower) {
     const follower = await state.modelFollower;
-    if (follower) await queueNativeResult({ ...result, ...follower.update(result.transcript, { final }) }, state.readingVersion);
+    if (follower) await queueNativeResult({ ...result, ...follower.update(result.transcript, { final, settled: true }) }, state.readingVersion);
     else applyResult(result);
   } else applyResult(result);
   if (final) setReadStatus(result.quiet ? 'Дауыс анық естілмеді' : `Оқу аяқталды · ${state.confirmed} сөз`);
@@ -454,6 +491,7 @@ async function startRecording(mode = 'page') {
     };
     state.source.connect(state.processor); state.processor.connect(state.context.destination);
     state.chunks = []; state.sampleCount = 0; state.confirmed = 0; state.blocked = false;
+    state.currentGlyph = null; state.pendingGlyph = null; state.issue = null; state.pending = false; updateReadingFeedback();
     state.revealedWords.clear();
     state.uncertainWords.clear();
     state.readingVersion++;
@@ -465,7 +503,7 @@ async function startRecording(mode = 'page') {
     state.timer = setInterval(() => {
       const seconds = Math.floor((Date.now() - state.started) / 1000);
       if (seconds >= (mode === 'phonetics' ? 30 : 180)) { void stopRecording(); return; }
-      if (mode === 'page' && seconds >= 6 && seconds - state.lastCheck >= 8 && !state.inflight) {
+      if (mode === 'page' && seconds >= 2 && seconds - state.lastCheck >= 3 && !state.inflight) {
         state.lastCheck = seconds;
         state.inflight = analyze(false).catch(showError).finally(() => { state.inflight = null; });
       }
@@ -477,6 +515,7 @@ function startNativeRecording() {
   if (state.recording || state.finishing || !state.pageData) return;
   if (state.confirmed === state.words.length) { state.confirmed = 0; state.revealedWords.clear(); }
   state.blocked = false; state.nativeError = false;
+  state.currentGlyph = null; state.pendingGlyph = null; state.issue = null; state.pending = false; updateReadingFeedback();
   state.readingVersion++;
   const version = state.readingVersion;
   const sourcePage = state.page;
@@ -517,6 +556,7 @@ function startNativeRecording() {
 async function cleanupMic() {
   if (state.timer) clearInterval(state.timer);
   state.timer = null; state.recording = false; state.finishing = false;
+  updateReadingFeedback();
   state.processor?.disconnect(); state.source?.disconnect();
   state.stream?.getTracks().forEach((track) => track.stop());
   if (state.context && state.context.state !== 'closed') await state.context.close();
@@ -597,6 +637,14 @@ async function init() {
     $('hideToggle').addEventListener('click', () => { state.hide = !state.hide; savePreference('quran-hide', state.hide); updateReveal(); });
     $('errorsToggle').addEventListener('click', () => { $('advancedPanel').classList.add('hidden'); $('errorsPanel').classList.toggle('hidden'); });
     $('closeErrors').addEventListener('click', () => $('errorsPanel').classList.add('hidden'));
+    const updateHapticsToggle = () => {
+      const supported = typeof navigator.vibrate === 'function';
+      $('hapticsToggle').textContent = supported ? (state.haptics ? 'Діріл қосулы' : 'Діріл өшірулі') : 'Бұл браузер дірілді қолдамайды';
+      $('hapticsToggle').disabled = !supported;
+      $('hapticsToggle').setAttribute('aria-pressed', String(supported && state.haptics));
+    };
+    updateHapticsToggle();
+    $('hapticsToggle').addEventListener('click', () => { state.haptics = !state.haptics; savePreference('quran-haptics', state.haptics); updateHapticsToggle(); updateReadingFeedback(); });
     $('advancedToggle').addEventListener('click', () => { $('errorsPanel').classList.add('hidden'); $('advancedPanel').classList.toggle('hidden'); });
     $('closeAdvanced').addEventListener('click', () => $('advancedPanel').classList.add('hidden'));
     $('startAdvanced').addEventListener('click', () => {
@@ -623,6 +671,7 @@ async function init() {
     window.addEventListener('resize', fitLines);
     await loadPage(state.page);
     if (browserMode) {
+      $('hapticsToggle').classList.add('hidden');
       $('start').disabled = voice.mode === 'unavailable';
       state.modelReady = voice.mode === 'native';
       $('modelStatus').textContent = voice.mode === 'native'
