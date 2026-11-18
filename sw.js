@@ -1,6 +1,6 @@
 /* Build placeholders are replaced for the published /ayat/ scope. */
-const VERSION = '15c11438eb97';
-const PRECACHE = ["./index.html","./manifest.webmanifest","./uthmanic-hafs.woff2","./data/quran.json","./voice-worker.js","./lib/align.js","./lib/progress.js","./lib/audio.js","./app.js?v=15c11438eb97","./runtime.js?v=15c11438eb97","./pwa.js?v=15c11438eb97","./config.js?v=15c11438eb97","./styles.css?v=15c11438eb97","./ui.css?v=15c11438eb97","./lib/native-recitation.js?v=15c11438eb97","./lib/recitation-feedback.js?v=15c11438eb97","./lib/recitation-follow.js?v=15c11438eb97","./lib/live-progress.js?v=15c11438eb97","./icons/icon-192.png","./icons/icon-512.png","./icons/maskable-512.png","./icons/apple-touch-icon.png"];
+const VERSION = 'f01423c02eba';
+const PRECACHE = ["./index.html","./manifest.webmanifest","./uthmanic-hafs.woff2","./data/quran.json","./app.js?v=f01423c02eba","./runtime.js?v=f01423c02eba","./voice-worker.js?v=f01423c02eba","./pwa.js?v=f01423c02eba","./config.js?v=f01423c02eba","./styles.css?v=f01423c02eba","./ui.css?v=f01423c02eba","./lib/align.js?v=f01423c02eba","./lib/audio.js?v=f01423c02eba","./lib/progress.js?v=f01423c02eba","./lib/live-audio.js?v=f01423c02eba","./lib/live-progress.js?v=f01423c02eba","./lib/native-recitation.js?v=f01423c02eba","./lib/recitation-follow.js?v=f01423c02eba","./lib/recitation-feedback.js?v=f01423c02eba","./icons/icon-192.png","./icons/icon-512.png","./icons/maskable-512.png","./icons/apple-touch-icon.png"];
 const FONT_BASE = 'https://cdn.jsdelivr.net/gh/hussainsajib/qpc-v4-mushaf-bundle@f84ccb5688d5404748a0d38e6c53e09df4469ec9/fonts';
 const ROOT = new URL('./', self.location.href);
 const PREFIX = `ayat:${ROOT.pathname}:`;

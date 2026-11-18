@@ -6,6 +6,17 @@ let modelStatus = { status: 'idle', progress: 0 };
 const pending = new Map();
 let recitationIndex;
 
+function resetWorker(error) {
+  modelStatus = { status: 'error', error: error.message };
+  worker?.terminate();
+  worker = null;
+  for (const item of pending.values()) {
+    clearTimeout(item.timer);
+    item.reject(error);
+  }
+  pending.clear();
+}
+
 async function json(url, options) {
   const response = await fetch(url, options);
   const result = await response.json();
@@ -31,37 +42,47 @@ export function pageFont(n) {
 
 function request(type, payload = {}) {
   if (!worker) {
-    worker = new Worker(new URL('./voice-worker.js', import.meta.url), { type: 'module' });
+    const workerUrl = new URL('./voice-worker.js', import.meta.url);
+    workerUrl.searchParams.set('v', config.version || 'local');
+    worker = new Worker(workerUrl, { type: 'module' });
     worker.onmessage = ({ data }) => {
       if (data.type === 'status') { modelStatus = data.status; return; }
       const item = pending.get(data.id);
       if (!item) return;
       pending.delete(data.id);
+      clearTimeout(item.timer);
       if (data.error) item.reject(new Error(data.error)); else item.resolve(data.result);
     };
-    worker.onerror = () => {
-      const error = new Error('Дауыс модулі ашылмады. Бетті жаңартып, қайта қосыңыз.');
-      modelStatus = { status: 'error', error: error.message };
-      for (const item of pending.values()) item.reject(error);
-      pending.clear(); worker.terminate(); worker = null;
-    };
+    worker.onerror = () => resetWorker(new Error('Дауыс модулі ашылмады. Бетті жаңартып, қайта қосыңыз.'));
+    worker.onmessageerror = () => resetWorker(new Error('Дауыс модулінің жауабы оқылмады. Қайта қосып көріңіз.'));
   }
   const id = ++requestId;
   return new Promise((resolve, reject) => {
-    pending.set(id, { resolve, reject });
-    worker.postMessage({ id, type, ...payload });
+    const timer = type === 'analyze' ? setTimeout(() => {
+      resetWorker(new Error('Дауыс модулі уақытында жауап бермеді. Қайта қосып көріңіз.'));
+    }, 90_000) : undefined;
+    pending.set(id, { resolve, reject, timer });
+    try { worker.postMessage({ id, type, ...payload }); }
+    catch (error) { resetWorker(error); }
   });
 }
 
 export function getModelStatus() { return browserMode ? Promise.resolve(modelStatus) : json('/api/model'); }
-export function prepareModel() {
+export async function prepareModel() {
   if (!browserMode) return json('/api/prepare', { method: 'POST' });
   modelStatus = { status: 'loading', progress: 0 };
-  return request('prepare');
+  try {
+    const result = await request('prepare');
+    modelStatus = { status: 'ready', progress: 100 };
+    return result;
+  } catch (error) {
+    modelStatus = { status: 'error', error: error.message };
+    throw error;
+  }
 }
 export function analyzeAudio({ page, audio, sampleRate, final }) {
   if (browserMode) return request('analyze', { page, audio, sampleRate, final });
   return json(`/api/analyze?page=${page.page}&final=${final}`, {
-    method: 'POST', headers: { 'Content-Type': 'application/octet-stream', 'X-Sample-Rate': String(sampleRate) }, body: audio.buffer,
+    method: 'POST', headers: { 'Content-Type': 'application/octet-stream', 'X-Sample-Rate': String(sampleRate) }, body: audio,
   });
 }

@@ -1,28 +1,70 @@
-import { browserMode, getQuran, getPage, pageFont, getModelStatus, prepareModel, analyzeAudio, getRecitationIndex } from './runtime.js?v=15c11438eb97';
-import { voicePolicy, createNativeRecitation } from './lib/native-recitation.js?v=15c11438eb97';
-import { createRecitationHaptics, describeIssue, describePhoneticIssue } from './lib/recitation-feedback.js?v=15c11438eb97';
-import { initPwa, rememberOfflinePage } from './pwa.js?v=15c11438eb97';
+import { browserMode, getQuran, getPage, pageFont, getModelStatus, prepareModel, analyzeAudio, getRecitationIndex } from './runtime.js?v=f01423c02eba';
+import { voicePolicy, createNativeRecitation } from './lib/native-recitation.js?v=f01423c02eba';
+import { createRecitationAlerts, describeIssue, describePhoneticIssue } from './lib/recitation-feedback.js?v=f01423c02eba';
+import { initPwa, rememberOfflinePage } from './pwa.js?v=f01423c02eba';
+import { createAudioSegments } from './lib/live-audio.js?v=f01423c02eba';
+import { createLiveProgress } from './lib/live-progress.js?v=f01423c02eba';
 const voice = browserMode ? voicePolicy(window, navigator) : { mode: 'model' };
+const ToneContext = window.AudioContext || window.webkitAudioContext;
 const $ = (id) => document.getElementById(id);
 const savedTheme = localStorage.getItem('quran-theme');
 const state = {
   chapters: [], structure: [], page: Math.min(604, Math.max(1, Number(new URLSearchParams(location.search).get('page')) || Number(localStorage.getItem('quran-page')) || 1)),
   pageData: null, words: [], hide: localStorage.getItem('quran-hide') === 'true',
-  confirmed: 0, revealedWords: new Set(), uncertainWords: new Set(), revealedPages: new Map(), readingVersion: 0, queuedResult: null, applyingResult: false,
-  blocked: false, currentGlyph: null, pending: false, issue: null, haptics: localStorage.getItem('quran-haptics') !== 'false', modelReady: false, recording: false, chunks: [], sampleCount: 0,
-  stream: null, context: null, source: null, processor: null, timer: null, started: 0, inflight: null, lastCheck: 0,
+  confirmed: 0, revealedWords: new Set(), uncertainWords: new Set(), revealedPages: new Map(), readingVersion: 0, queuedResult: null, applyingResult: null,
+  prefillBeforeGlyph: 0,
+  blocked: false, currentGlyph: null, pending: false, issue: null, issues: [],
+  soundAlerts: localStorage.getItem('quran-sound-alerts') !== 'false', haptics: localStorage.getItem('quran-haptics') !== 'false',
+  modelReady: false, recording: false, chunks: [], sampleCount: 0,
+  stream: null, context: null, source: null, processor: null, timer: null, started: 0, inflight: null, screenLock: null,
   loadedFonts: new Map(), nativeSession: null, nativeError: false, pendingGlyph: null,
   pageRequest: 0,
   modelFollower: null,
-  recordMode: 'page', advancedVerse: null, finishing: false,
+  audioSegments: null, modelSegment: null, analysisError: null,
+  recordMode: 'page', advancedVerse: null, starting: false, finishing: false,
+  resumePage: null, resumeWords: new Set(), resumePrefillBeforeGlyph: 0,
   navTab: 'surah',
   bookmarks: JSON.parse(localStorage.getItem('quran-bookmarks') || '[]'),
   recent: JSON.parse(localStorage.getItem('quran-recent') || '[]'),
 };
-const haptics = createRecitationHaptics({ vibrate: pattern => navigator.vibrate?.(pattern) });
+let toneContext;
+const alerts = createRecitationAlerts({ playTone: playRecitationTone, vibrate: pattern => navigator.vibrate?.(pattern) });
 if (savedTheme === 'light' || savedTheme === 'dark') document.documentElement.dataset.theme = savedTheme;
 
 function savePreference(name, value) { try { localStorage.setItem(name, String(value)); } catch {} }
+
+function enableRecitationTone() {
+  if (!state.soundAlerts || !ToneContext) return;
+  try {
+    toneContext ||= new ToneContext();
+    if (toneContext.state !== 'running') void toneContext.resume().catch(() => {});
+  } catch {}
+}
+
+function playRecitationTone() {
+  if (toneContext?.state !== 'running') return;
+  const start = toneContext.currentTime;
+  const oscillator = toneContext.createOscillator();
+  const volume = toneContext.createGain();
+  oscillator.frequency.value = 650;
+  volume.gain.setValueAtTime(0, start);
+  volume.gain.linearRampToValueAtTime(0.16, start + 0.012);
+  volume.gain.linearRampToValueAtTime(0, start + 0.11);
+  oscillator.connect(volume);
+  volume.connect(toneContext.destination);
+  oscillator.onended = () => { oscillator.disconnect(); volume.disconnect(); };
+  oscillator.start(start);
+  oscillator.stop(start + 0.11);
+}
+
+function updateRecitationAlerts() {
+  alerts.update(state.issues, {
+    active: state.recording && !state.finishing && !document.hidden,
+    sound: state.soundAlerts && Boolean(ToneContext),
+    vibration: state.haptics && typeof navigator.vibrate === 'function',
+  });
+}
+
 function closeNavigation() {
   $('navigationPanel').classList.add('hidden');
   $('menuToggle').setAttribute('aria-expanded', 'false');
@@ -79,6 +121,15 @@ function renderNavigation() {
 }
 function setReadStatus(text, type = '') { $('recordingStatus').textContent = text; $('recordingStatus').className = `read-status ${type}`; }
 function showVoiceNotice(text) { $('voiceNoticeText').textContent = text; $('voiceNotice').classList.remove('hidden'); }
+async function keepReadingScreenOn() {
+  if (!navigator.wakeLock || state.screenLock || !state.recording || document.hidden) return;
+  try {
+    const lock = await navigator.wakeLock.request('screen');
+    if (!state.recording || document.hidden) { await lock.release(); return; }
+    state.screenLock = lock;
+    lock.addEventListener('release', () => { if (state.screenLock === lock) state.screenLock = null; }, { once: true });
+  } catch {}
+}
 function arabicNumber(n) { return Number(n).toLocaleString('ar-EG'); }
 function verseKey(s, a) { return `${s}:${a}`; }
 function hasArabicLetters(text) { return /[\u0621-\u064A]/.test(text); }
@@ -128,9 +179,11 @@ function updateReveal() {
   $('hideToggle').setAttribute('aria-pressed', String(state.hide));
   document.querySelectorAll('.qword').forEach((el) => {
     const index = Number(el.dataset.index);
-    el.classList.toggle('revealed', state.revealedWords.has(index));
+    const matched = state.revealedWords.has(index);
+    const uncertain = !matched && state.uncertainWords.has(index);
+    el.classList.toggle('revealed', matched || (!uncertain && index < state.prefillBeforeGlyph));
     el.classList.remove('blocked');
-    el.classList.toggle('uncertain', state.uncertainWords.has(index) && !state.revealedWords.has(index));
+    el.classList.toggle('uncertain', uncertain);
     const current = state.recording && index === state.currentGlyph;
     el.classList.toggle('reading-current', current);
     el.classList.toggle('reading-pending', state.recording && index === state.pendingGlyph);
@@ -143,15 +196,17 @@ function updateReadingFeedback() {
   const feedback = describeIssue(state.issue);
   $('readingFeedback').classList.toggle('hidden', !feedback || !state.recording);
   if (feedback) {
-    $('feedbackTitle').textContent = feedback.title;
-    $('feedbackLocation').textContent = feedback.location;
-    $('feedbackExpected').textContent = feedback.expected;
-    $('feedbackHeard').textContent = feedback.heard || '—';
-    $('feedbackDetail').textContent = feedback.detail;
+    for (const [id, text] of [
+      ['feedbackTitle', feedback.title], ['feedbackLocation', feedback.location],
+      ['feedbackExpected', feedback.expected], ['feedbackHeard', feedback.heard || '—'],
+      ['feedbackDetail', feedback.detail],
+    ]) {
+      const field = $(id);
+      if (field.textContent !== text) field.textContent = text;
+    }
     const word = document.querySelector(`.qword[data-index="${state.currentGlyph}"]`);
     $('readingFeedback').classList.toggle('above', Boolean(word && word.getBoundingClientRect().bottom > window.innerHeight - 235));
   }
-  haptics.update(state.issue, { enabled: state.haptics, active: state.recording });
 }
 
 function updateAdvancedVerses(page) {
@@ -310,7 +365,7 @@ function renderQpcPage(page) {
 }
 
 async function loadPage(n, { following = false, readingVersion = null } = {}) {
-  if ((!following && (state.recording || state.finishing)) || !Number.isInteger(n) || n < 1 || n > 604) return;
+  if ((!following && (state.starting || state.recording || state.finishing)) || !Number.isInteger(n) || n < 1 || n > 604) return;
   if (!following) state.readingVersion++;
   const requestId = ++state.pageRequest;
   const pageData = await getPage(n);
@@ -330,7 +385,9 @@ async function loadPage(n, { following = false, readingVersion = null } = {}) {
   state.pageData = pageData;
   state.page = n;
   state.confirmed = 0;
-  state.revealedWords = following ? new Set(state.revealedPages.get(n) || []) : new Set();
+  const previous = following ? state.revealedPages.get(n) : null;
+  state.revealedWords = new Set(previous?.words);
+  state.prefillBeforeGlyph = previous?.prefillBeforeGlyph ?? 0;
   state.uncertainWords.clear();
   $('voiceNotice').classList.add('hidden');
   state.blocked = false;
@@ -355,24 +412,26 @@ async function loadPage(n, { following = false, readingVersion = null } = {}) {
   if (!$('navigationPanel').classList.contains('hidden')) renderNavigation();
 }
 
-async function queueNativeResult(result, version) {
+function queueNativeResult(result, version) {
   if (version !== state.readingVersion) return;
   state.queuedResult = { result, version };
-  if (state.applyingResult) return;
-  state.applyingResult = true;
+  state.applyingResult ||= Promise.resolve().then(applyQueuedResults);
+  return state.applyingResult;
+}
+
+async function applyQueuedResults() {
   try {
     while (state.queuedResult) {
       const item = state.queuedResult; state.queuedResult = null;
       if (item.version !== state.readingVersion) continue;
-      if (item.result.page && item.result.page !== state.page && !item.result.progress.waitingForStart) {
-        state.revealedPages.set(state.page, new Set(state.revealedWords));
-        setReadStatus('Оқылған бет ашылуда…', 'active');
+      if (item.result.page && item.result.page !== state.page) {
+        if (state.recording && !state.nativeError) setReadStatus('Оқылған бет ашылуда…', 'active');
         await loadPage(item.result.page, { following: true, readingVersion: item.version });
       }
       if (item.version === state.readingVersion && (!item.result.page || item.result.page === state.page)) applyResult(item.result);
     }
   } catch (error) { showVoiceNotice(`Бет ашылмады: ${error.message}`); }
-  finally { state.applyingResult = false; }
+  finally { state.applyingResult = null; }
 }
 
 function applyResult(result) {
@@ -381,31 +440,41 @@ function applyResult(result) {
   const previous = state.confirmed;
   const end = progress.confirmedGlyphs ?? progress.confirmed;
   if (progress.matchedGlyphs) {
-    for (const i of progress.matchedGlyphs) state.revealedWords.add(i);
+    const resumeWords = state.resumePage === state.page ? state.resumeWords : [];
+    state.revealedWords = new Set([...resumeWords, ...progress.matchedGlyphs]);
     state.uncertainWords = new Set((progress.uncertainGlyphs || []).filter(i => !state.revealedWords.has(i)));
-  } else if (!progress.waitingForStart) for (let i = progress.revealedFrom ?? 0; i < end; i++) state.revealedWords.add(i);
-  state.confirmed = Math.max(state.confirmed, progress.confirmedGlyphs ?? progress.confirmed);
-  state.blocked = (progress.confirmedGlyphs ?? progress.confirmed) >= previous && progress.blocked;
+    state.confirmed = Math.max(end, ...Array.from(resumeWords, i => i + 1));
+    state.blocked = Boolean(progress.blocked);
+  } else {
+    if (!progress.waitingForStart) for (let i = progress.revealedFrom ?? 0; i < end; i++) state.revealedWords.add(i);
+    state.confirmed = Math.max(previous, end);
+    state.blocked = end >= previous && progress.blocked;
+  }
   state.pending = Boolean(progress.pending);
-  state.currentGlyph = progress.lastMatchedGlyph ?? (end > 0 ? end - 1 : null);
-  state.pendingGlyph = (state.blocked || state.pending) ? (progress.currentGlyph ?? end) : null;
+  state.currentGlyph = Object.hasOwn(progress, 'trackingGlyph')
+    ? progress.trackingGlyph : progress.lastMatchedGlyph ?? (end > 0 ? end - 1 : null);
+  state.pendingGlyph = Object.hasOwn(progress, 'pendingGlyph')
+    ? progress.pendingGlyph : (state.blocked || state.pending) ? (progress.currentGlyph ?? end) : null;
   state.issue = progress.issue || null;
-  state.revealedPages.set(state.page, new Set(state.revealedWords));
+  state.issues = progress.issues ?? (state.issue ? [state.issue] : []);
+  const resumePrefill = state.resumePage === state.page ? state.resumePrefillBeforeGlyph : 0;
+  state.prefillBeforeGlyph = Math.max(resumePrefill, progress.prefillBeforeGlyph ?? 0);
+  state.revealedPages.set(state.page, { words: new Set(state.revealedWords), prefillBeforeGlyph: state.prefillBeforeGlyph });
   // A transcript difference is uncertainty, never a verified reading error.
   $('errorLabel').textContent = 'Тексеру';
   $('errorCount').textContent = '0';
   $('errorCount').classList.add('hidden');
   const feedback = describeIssue(state.issue);
+  const listeningStatus = progress.openingOnly ? 'Аятты оқуды бастаңыз…'
+    : progress.waitingForStart ? 'Құраннан ізделуде…' : `${state.revealedWords.size} сөз танылды`;
   $('errorMessage').textContent = feedback ? `${feedback.title} · ${feedback.location}. Күтілгені: ${feedback.expected}. Танылғаны: ${feedback.heard || '—'}. ${feedback.detail}` : state.uncertainWords.size
-    ? 'Дауыс анық танылмады. Белгіленген сөзден қайта оқыңыз; оқу орны сақталды. Бұл оқу қатесі деп есептелмейді.'
-    : state.blocked
-    ? `Оқу орны: ${progress.blockedAt?.surah ?? state.words[state.confirmed]?.surah}:${progress.blockedAt?.ayah ?? state.words[state.confirmed]?.ayah}. Дауыс анық танылмады; асты сызылған сөзден қайта оқыңыз.`
-    : progress.waitingForStart ? 'Оқи беріңіз: басталған аят анықталуда.' : `${state.revealedWords.size} сөз танылды. ${state.words.length - state.revealedWords.size} сөз қалды.`;
+    ? 'Асты сызылған сөздерді қайта тексеруге болады.' : listeningStatus;
   $('transcript').textContent = result.transcript || '';
   $('phoneticFindings').classList.add('hidden');
   $('transcript').classList.remove('hidden');
-  if (state.recording) setReadStatus(state.blocked ? 'Сөзді нақтылап оқыңыз' : state.pending ? 'Сөз нақтылануда…' : progress.waitingForStart ? 'Құраннан ізделуде…' : `${state.revealedWords.size} сөз танылды`, 'active');
+  if (state.recording && !state.nativeError) setReadStatus(state.blocked || state.pending ? 'Сөз нақтылануда…' : listeningStatus, 'active');
   updateReadingFeedback();
+  updateRecitationAlerts();
   updateReveal();
 }
 
@@ -441,7 +510,10 @@ async function analyzePhonetics() {
     return row;
   }));
   $('phoneticFindings').classList.remove('hidden');
-  if (result.errors.length && state.haptics) { try { navigator.vibrate?.([90, 70, 90]); } catch {} }
+  if (result.errors.length) {
+    if (state.soundAlerts) { try { playRecitationTone(); } catch {} }
+    if (state.haptics) { try { navigator.vibrate?.([90, 70, 90]); } catch {} }
+  }
   document.querySelector('.panel-note').textContent = 'Бұл модель де жаңылысуы мүмкін. Харакат пен тәжуид нәтижесін ұстазбен тексеріңіз.';
   $('errorsPanel').classList.remove('hidden');
   setReadStatus(`Терең тексеру аяқталды · ${result.errors.length} ықтимал қате`);
@@ -454,16 +526,18 @@ function audioBuffer() {
   return output;
 }
 
-async function analyze(final = false) {
-  if (!state.context || state.sampleCount < state.context.sampleRate / 2) return;
-  const audio = audioBuffer();
-  const result = await analyzeAudio({ page: state.pageData, audio, sampleRate: state.context.sampleRate, final });
-  if (!result.quiet && state.modelFollower) {
-    const follower = await state.modelFollower;
-    if (follower) await queueNativeResult({ ...result, ...follower.update(result.transcript, { final, settled: true }) }, state.readingVersion);
-    else applyResult(result);
-  } else applyResult(result);
-  if (final) setReadStatus(result.quiet ? 'Дауыс анық естілмеді' : `Оқу аяқталды · ${state.confirmed} сөз`);
+async function analyzeSegment(snapshot) {
+  const version = state.readingVersion;
+  const result = await analyzeAudio({ page: state.pageData, ...snapshot });
+  if (version !== state.readingVersion || (result.quiet && !snapshot.final)) return;
+  const follower = await state.modelFollower;
+  if (version !== state.readingVersion) return;
+  if (follower) {
+    if (state.modelSegment !== null && state.modelSegment !== snapshot.segment) follower.nextSegment();
+    state.modelSegment = snapshot.segment;
+    const followed = follower.update(result.transcript || '', { final: snapshot.final, settled: true, overlap: snapshot.overlap });
+    await queueNativeResult({ ...result, ...followed, quiet: false }, version);
+  } else if (!result.quiet) applyResult(result);
 }
 
 async function makeFollower(page, startGlyph = null) {
@@ -473,20 +547,44 @@ async function makeFollower(page, startGlyph = null) {
 }
 
 async function startRecording(mode = 'page') {
+  if (state.starting || state.recording || state.finishing || !state.pageData) return;
   if (voice.mode === 'unavailable' && mode === 'page') return;
   if (voice.mode === 'native' && mode === 'page') { startNativeRecording(); return; }
-  if (browserMode && !state.modelReady && mode === 'page') {
+  if (!state.modelReady && mode === 'page') {
+    state.starting = true;
     $('start').disabled = true;
-    const preparation = prepareModel();
-    void checkModel();
-    try { await preparation; state.modelReady = true; setReadStatus('Дайын · микрофонды басыңыз'); }
-    catch (error) { showError(error); }
-    finally { $('start').disabled = false; }
+    setReadStatus('Құран моделі дайындалуда…');
+    try {
+      const preparation = prepareModel();
+      if (browserMode) void checkModel();
+      await preparation;
+      if (browserMode) {
+        state.modelReady = true;
+        setReadStatus('Дайын · микрофонды басыңыз');
+      } else await checkModel();
+    }
+    catch (error) {
+      $('start').disabled = false;
+      showError(error);
+      showVoiceNotice(error.message);
+    }
+    finally {
+      state.starting = false;
+      if (browserMode || state.modelReady) $('start').disabled = false;
+    }
     return;
   }
-  if ((mode === 'page' && !state.modelReady) || state.recording || state.finishing || !state.pageData) return;
+  state.starting = true;
+  enableRecitationTone();
+  state.pageRequest++;
+  $('start').disabled = true;
+  $('startAdvanced').disabled = true;
+  $('voiceNotice').classList.add('hidden');
+  setReadStatus('Микрофонға рұқсат беріңіз…', 'active');
   try {
-    state.stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } });
+    if (!navigator.mediaDevices?.getUserMedia) throw new Error('Микрофонды қолдану үшін сайтты HTTPS арқылы немесе осы компьютерде ашыңыз.');
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } });
+    state.stream = stream;
     state.context = new AudioContext(mode === 'phonetics' ? { sampleRate: 16000 } : undefined);
     await state.context.resume();
     state.source = state.context.createMediaStreamSource(state.stream);
@@ -495,39 +593,94 @@ async function startRecording(mode = 'page') {
       event.outputBuffer.getChannelData(0).fill(0);
       if (!state.recording) return;
       const copy = new Float32Array(event.inputBuffer.getChannelData(0));
-      state.chunks.push(copy); state.sampleCount += copy.length;
+      if (mode === 'page') state.audioSegments.push(copy); else state.chunks.push(copy);
+      state.sampleCount += copy.length;
     };
     state.source.connect(state.processor); state.processor.connect(state.context.destination);
     state.chunks = []; state.sampleCount = 0; state.confirmed = 0; state.blocked = false;
-    state.currentGlyph = null; state.pendingGlyph = null; state.issue = null; state.pending = false; updateReadingFeedback();
+    state.audioSegments = mode === 'page' ? createAudioSegments(state.context.sampleRate) : null;
+    state.modelSegment = null; state.analysisError = null; state.nativeError = false;
+    state.resumePage = null; state.resumeWords.clear(); state.resumePrefillBeforeGlyph = 0;
+    state.prefillBeforeGlyph = 0; state.revealedPages.clear();
+    state.currentGlyph = null; state.pendingGlyph = null; state.issue = null; state.issues = []; state.pending = false;
+    alerts.reset(); updateReadingFeedback();
     state.revealedWords.clear();
     state.uncertainWords.clear();
     state.readingVersion++;
-    state.modelFollower = makeFollower(state.page).catch(() => null);
-    state.recording = true; state.recordMode = mode; state.started = Date.now(); state.lastCheck = 0;
+    if (mode === 'page') {
+      const words = state.words;
+      const allowBasmala = state.pageData.lines.some(line => line.type === 'basmallah' || line.type === 'basmala') ||
+        (state.pageData.lines.some(line => line.type === 'surah-header') && words[0]?.surah !== 1 && words[0]?.surah !== 9);
+      const page = state.page;
+      state.modelFollower = makeFollower(page).catch(() => {
+        const tracker = createLiveProgress(words, { allowBasmala, page });
+        return {
+          nextSegment: () => tracker.nextSegment(),
+          update: (transcript, options) => ({ progress: tracker.update(transcript, options) }),
+        };
+      });
+    }
+    state.recording = true; state.recordMode = mode; state.started = Date.now();
+    void keepReadingScreenOn();
     $('start').classList.add('hidden'); $('stop').classList.remove('hidden'); $('surah').disabled = true;
     $('advancedPanel').classList.add('hidden'); $('errorsPanel').classList.add('hidden');
     renderPage(); setReadStatus(mode === 'phonetics' ? 'Таңдалған аятты оқыңыз…' : 'Тыңдап тұрмын…', 'active');
+    stream.getAudioTracks().forEach(track => track.addEventListener('ended', () => {
+      if (state.stream !== stream || !state.recording) return;
+      state.analysisError = new Error('Микрофон ажыратылды. Қайта қосып, оқуды жалғастырыңыз.');
+      void stopRecording();
+    }, { once: true }));
     state.timer = setInterval(() => {
       const seconds = Math.floor((Date.now() - state.started) / 1000);
       if (seconds >= (mode === 'phonetics' ? 30 : 180)) { void stopRecording(); return; }
-      if (mode === 'page' && seconds >= 2 && seconds - state.lastCheck >= 3 && !state.inflight) {
-        state.lastCheck = seconds;
-        state.inflight = analyze(false).catch(showError).finally(() => { state.inflight = null; });
+      if (mode === 'page' && !state.inflight) {
+        const snapshot = state.audioSegments.take();
+        if (snapshot) {
+          state.inflight = analyzeSegment(snapshot)
+            .catch(error => { state.analysisError = error; })
+            .finally(() => {
+              state.inflight = null;
+              if (state.analysisError && state.recording) void stopRecording();
+            });
+        } else if (!state.audioSegments.heardVoice && seconds === 5) {
+          setReadStatus('Дауыс естілмеді · микрофонды тексеріңіз', 'active');
+        }
       }
-    }, 1000);
-  } catch (error) { showError(error); await cleanupMic(); }
+    }, 200);
+  } catch (error) {
+    const message = {
+      NotAllowedError: 'Браузер баптауларында микрофонға рұқсат беріңіз.',
+      NotFoundError: 'Микрофон табылмады. Микрофонды қосып, қайталап көріңіз.',
+      NotReadableError: 'Микрофонды ашу мүмкін болмады. Басқа қолданба қолданып тұрмағанын тексеріңіз.',
+    }[error.name] || error.message;
+    showError(error);
+    showVoiceNotice(message);
+    await cleanupMic();
+  } finally {
+    state.starting = false;
+    $('start').disabled = false;
+    $('startAdvanced').disabled = false;
+  }
 }
 
 function startNativeRecording() {
   if (state.recording || state.finishing || !state.pageData) return;
-  if (state.confirmed === state.words.length) { state.confirmed = 0; state.revealedWords.clear(); }
+  enableRecitationTone();
+  if (state.confirmed === state.words.length) {
+    state.confirmed = 0; state.revealedWords.clear(); state.prefillBeforeGlyph = 0;
+  }
   state.blocked = false; state.nativeError = false;
-  state.currentGlyph = null; state.pendingGlyph = null; state.issue = null; state.pending = false; updateReadingFeedback();
+  state.currentGlyph = null; state.pendingGlyph = null; state.issue = null; state.issues = []; state.pending = false;
+  alerts.reset(); updateReadingFeedback();
   state.readingVersion++;
   const version = state.readingVersion;
   const sourcePage = state.page;
   const sourceGlyph = state.confirmed > 0 ? state.confirmed : null;
+  state.pageRequest++;
+  state.resumePage = sourcePage;
+  state.resumeWords = new Set(state.revealedWords);
+  state.resumePrefillBeforeGlyph = state.prefillBeforeGlyph;
+  state.revealedPages.clear();
   $('voiceNotice').classList.add('hidden');
   try {
     const session = createNativeRecitation({
@@ -542,18 +695,19 @@ function startNativeRecording() {
       },
       onEnd: () => {
         state.nativeSession = null;
-        void cleanupMic().then(() => {
+        state.finishing = true;
+        void Promise.resolve(state.applyingResult).then(cleanupMic).then(() => {
           $('stop').disabled = false;
-          if (!state.nativeError) setReadStatus(`Оқу аяқталды · ${state.revealedWords.size} сөз`);
+          if (!state.nativeError) showReadingSummary();
         });
       },
     });
     state.nativeSession = session; state.recordMode = 'native'; state.recording = true;
-    session.start();
     $('start').classList.add('hidden'); $('stop').classList.remove('hidden'); $('surah').disabled = true;
     $('errorsPanel').classList.add('hidden'); $('advancedPanel').classList.add('hidden');
     renderPage(); setReadStatus('Микрофонға рұқсат беріңіз…', 'active');
     $('modelStatus').textContent = 'Телефонның дауыс қызметі · аудио серверде өңделуі мүмкін';
+    session.start();
   } catch (error) {
     state.nativeError = true; showError(error); state.nativeSession = null;
     $('errorMessage').textContent = 'Дауыс қызметі ашылмады. Safari-де ашып, Siri мен микрофон/дауысты тану рұқсаттарын тексеріңіз.';
@@ -563,34 +717,66 @@ function startNativeRecording() {
 
 async function cleanupMic() {
   if (state.timer) clearInterval(state.timer);
-  state.timer = null; state.recording = false; state.finishing = false;
+  state.timer = null; state.recording = false;
+  const screenLock = state.screenLock; state.screenLock = null;
+  if (screenLock) void screenLock.release().catch(() => {});
   updateReadingFeedback();
-  state.processor?.disconnect(); state.source?.disconnect();
-  state.stream?.getTracks().forEach((track) => track.stop());
-  if (state.context && state.context.state !== 'closed') await state.context.close();
+  updateRecitationAlerts();
+  disconnectMic();
+  state.audioSegments = null; state.modelSegment = null;
+  const context = state.context; state.context = null;
+  if (context && context.state !== 'closed') await context.close().catch(() => {});
+  state.chunks = []; state.modelFollower = null; state.finishing = false;
   $('start').classList.remove('hidden'); $('stop').classList.add('hidden'); $('surah').disabled = false;
   state.recordMode = 'page';
   renderPage();
+}
+
+function disconnectMic() {
+  if (state.processor) {
+    state.processor.onaudioprocess = null;
+    state.processor.disconnect();
+  }
+  state.source?.disconnect();
+  state.stream?.getTracks().forEach(track => track.stop());
+  state.processor = null; state.source = null; state.stream = null;
+}
+
+function showReadingSummary() {
+  const words = `${state.revealedWords.size} сөз танылды`;
+  setReadStatus(state.issue || state.blocked ? `${words} · белгіленген сөздер бар` : `Оқу аяқталды · ${words}`);
 }
 
 async function stopRecording() {
   if (!state.recording) return;
   if (state.recordMode === 'native') {
     state.finishing = true; $('stop').disabled = true;
+    updateRecitationAlerts();
     state.nativeSession?.stop(); return;
   }
   state.recording = false; state.finishing = true;
+  updateRecitationAlerts();
   clearInterval(state.timer); state.timer = null;
-  state.processor?.disconnect(); state.source?.disconnect();
-  state.stream?.getTracks().forEach((track) => track.stop());
+  disconnectMic();
   $('stop').disabled = true;
+  setReadStatus('Соңғы сөздер тексерілуде…', 'active');
   try {
     if (state.inflight) await state.inflight;
+    if (state.analysisError) throw state.analysisError;
     if (state.sampleCount < (state.context?.sampleRate || 16000) / 2) setReadStatus('Жазба тым қысқа');
     else if (state.recordMode === 'phonetics') await analyzePhonetics();
-    else await analyze(true);
+    else if (state.audioSegments) {
+      state.audioSegments.finish();
+      for (let snapshot; (snapshot = state.audioSegments.take());) await analyzeSegment(snapshot);
+      if (state.audioSegments.heardVoice) showReadingSummary();
+      else setReadStatus('Дауыс естілмеді · микрофонды тексеріңіз');
+    }
   }
-  catch (error) { showError(error); }
+  catch (error) {
+    showError(error);
+    showVoiceNotice(error.message);
+    if (state.recordMode === 'page') await checkModel();
+  }
   finally { await cleanupMic(); $('stop').disabled = false; }
 }
 
@@ -600,10 +786,10 @@ async function checkModel() {
   try {
     const status = await getModelStatus();
     if (status.status === 'ready') { state.modelReady = true; $('start').disabled = false; $('modelStatus').textContent = browserMode ? 'Дауыс осы құрылғыда өңделеді' : 'Дауыс моделі дайын · API кілті қажет емес'; return; }
-    if (status.status === 'error') { $('modelStatus').textContent = `Модель қатесі: ${status.error}`; return; }
+    if (status.status === 'error') { state.modelReady = false; $('start').disabled = false; $('modelStatus').textContent = `Модель қатесі: ${status.error}`; return; }
     $('modelStatus').textContent = status.status === 'idle' ? 'Дауыс моделі іске қосылуда…' : `Дауыс моделі жүктелуде… ${status.progress || 0}%`;
     setTimeout(checkModel, 1500);
-  } catch (error) { $('modelStatus').textContent = `Модель қатесі: ${error.message}`; }
+  } catch (error) { state.modelReady = false; $('start').disabled = false; $('modelStatus').textContent = `Модель қатесі: ${error.message}`; }
 }
 
 async function init() {
@@ -645,17 +831,30 @@ async function init() {
     $('hideToggle').addEventListener('click', () => { state.hide = !state.hide; savePreference('quran-hide', state.hide); updateReveal(); });
     $('errorsToggle').addEventListener('click', () => { $('advancedPanel').classList.add('hidden'); $('errorsPanel').classList.toggle('hidden'); });
     $('closeErrors').addEventListener('click', () => $('errorsPanel').classList.add('hidden'));
-    const updateHapticsToggle = () => {
+    const updateAlertToggles = () => {
+      $('soundToggle').textContent = ToneContext ? (state.soundAlerts ? 'Дыбыс қосулы' : 'Дыбыс өшірулі') : 'Дыбыс қолжетімсіз';
+      $('soundToggle').disabled = !ToneContext;
+      $('soundToggle').setAttribute('aria-pressed', String(Boolean(ToneContext) && state.soundAlerts));
       const supported = typeof navigator.vibrate === 'function';
       $('hapticsToggle').textContent = supported ? (state.haptics ? 'Діріл қосулы' : 'Діріл өшірулі') : 'Бұл браузер дірілді қолдамайды';
       $('hapticsToggle').disabled = !supported;
       $('hapticsToggle').setAttribute('aria-pressed', String(supported && state.haptics));
     };
-    updateHapticsToggle();
-    $('hapticsToggle').addEventListener('click', () => { state.haptics = !state.haptics; savePreference('quran-haptics', state.haptics); updateHapticsToggle(); updateReadingFeedback(); });
+    updateAlertToggles();
+    $('soundToggle').addEventListener('click', () => {
+      state.soundAlerts = !state.soundAlerts;
+      savePreference('quran-sound-alerts', state.soundAlerts);
+      enableRecitationTone(); updateAlertToggles(); updateRecitationAlerts();
+    });
+    $('hapticsToggle').addEventListener('click', () => {
+      state.haptics = !state.haptics;
+      savePreference('quran-haptics', state.haptics);
+      updateAlertToggles(); updateRecitationAlerts();
+    });
     $('advancedToggle').addEventListener('click', () => { $('errorsPanel').classList.add('hidden'); $('advancedPanel').classList.toggle('hidden'); });
     $('closeAdvanced').addEventListener('click', () => $('advancedPanel').classList.add('hidden'));
     $('startAdvanced').addEventListener('click', () => {
+      if (state.starting || state.recording || state.finishing) return;
       const [surah, ayah] = $('advancedAyah').value.split(':').map(Number);
       if (!surah || !ayah) return;
       state.advancedVerse = { surah, ayah };
@@ -677,22 +876,33 @@ async function init() {
       void loadPage(state.page + (dx > 0 ? 1 : -1)).catch(showError);
     }, { passive: true });
     window.addEventListener('resize', fitLines);
+    document.addEventListener('visibilitychange', () => {
+      updateRecitationAlerts();
+      if (state.recording && !document.hidden) enableRecitationTone();
+      if (!state.recording || state.recordMode === 'native') return;
+      if (document.hidden) {
+        state.audioSegments?.finish();
+        void state.context?.suspend().catch(() => {});
+      } else {
+        void state.context?.resume().catch(() => showVoiceNotice('Тыңдауды жалғастыру үшін микрофонды қайта қосыңыз.'));
+        void keepReadingScreenOn();
+      }
+    });
     await loadPage(state.page);
-    if (browserMode) void initPwa({ isReading: () => state.recording || state.finishing });
+    if (browserMode) void initPwa({ isReading: () => state.starting || state.recording || state.finishing });
     if (browserMode) {
-      $('hapticsToggle').classList.add('hidden');
       $('start').disabled = voice.mode === 'unavailable';
       state.modelReady = voice.mode === 'native';
       $('modelStatus').textContent = voice.mode === 'native'
         ? 'Телефонның дауыс қызметі · аудио серверде өңделуі мүмкін'
-        : voice.mode === 'unavailable' ? 'Дауыс үшін сайтты Safari немесе Chrome-да ашыңыз' : 'Микрофонды қосу · алғаш рет ≈300 МБ жүктеледі';
+        : voice.mode === 'unavailable' ? 'Дауыс үшін сайтты Safari немесе Chrome-да ашыңыз' : 'Құран моделі · алғаш рет ≈300 МБ жүктеледі';
       $('advancedAyah').classList.add('hidden');
       document.querySelector('.advanced-label').classList.add('hidden');
       $('startAdvanced').classList.add('hidden');
       document.querySelector('.advanced-help').textContent = 'Бұл сайт оқылған сөздерді тексереді. Харакат пен тәжуидті терең тексеру компьютерге орнатылған нұсқада қолжетімді. Дауысты тану қателесуі мүмкін.';
     } else {
-      await prepareModel();
-      await checkModel();
+      try { await prepareModel(); await checkModel(); }
+      catch (error) { $('start').disabled = false; throw error; }
     }
   } catch (error) { showError(error); }
 }

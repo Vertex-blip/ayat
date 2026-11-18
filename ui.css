@@ -110,7 +110,7 @@ button:focus-visible,select:focus-visible,input:focus-visible{outline:2px solid 
 .qpc-line .qword.reading-current,.qpc-line .qword.reading-pending{background:transparent;filter:brightness(0) saturate(100%) invert(39%) sepia(98%) saturate(1840%) hue-rotate(200deg) brightness(93%) contrast(96%)!important}
 :root[data-theme="dark"] .qpc-line .qword.reading-current,:root[data-theme="dark"] .qpc-line .qword.reading-pending{filter:brightness(0) saturate(100%) invert(71%) sepia(25%) saturate(1750%) hue-rotate(183deg) brightness(105%) contrast(103%)!important}
 .mushaf-line.reading-line{background:var(--reading-wash);border-radius:5px}
-.qword.reading-pending{border-bottom:2px dashed var(--reading)}
+.qword.reading-pending,.qword.uncertain{border-bottom:2px dashed var(--reading)}
 .quiet-button #errorLabel{margin:0;color:inherit}
 .hidden-verses.qpc-lines .qword.reading-current:not(.revealed){opacity:1;visibility:hidden;position:relative;filter:none!important;box-shadow:none}
 .hidden-verses.qpc-lines .qword.reading-current:not(.revealed)::after{content:"";visibility:visible;position:absolute;bottom:-4px;left:0;right:0;border-bottom:2px solid var(--reading)}
@@ -120,7 +120,8 @@ button:focus-visible,select:focus-visible,input:focus-visible{outline:2px solid 
 .feedback-content{min-width:0;flex:1}.feedback-heading{display:flex;align-items:center;justify-content:space-between;gap:8px;font-size:12px}.feedback-heading strong{font-weight:650}.feedback-heading>span{color:var(--muted);font-size:10px;font-variant-numeric:tabular-nums}
 .feedback-words{display:flex;flex-wrap:wrap;gap:6px 16px;margin-top:7px;color:var(--muted);font-size:10px}.feedback-words>span{min-width:0;max-width:100%}.feedback-words bdi{display:inline-block;max-width:100%;vertical-align:middle;overflow-wrap:anywhere;font-family:'Amiri Quran','Traditional Arabic',serif;font-size:20px;color:var(--ink);margin-left:5px}
 .feedback-words>span:first-child bdi{color:var(--reading)}.feedback-content p{font-size:10px;line-height:1.5;margin:5px 0 0;color:var(--muted)}
-.haptics-toggle{margin-top:12px;padding:7px 11px;border:1px solid var(--edge);border-radius:20px;background:transparent;color:var(--ink);font-size:11px}.haptics-toggle[aria-pressed="true"]{border-color:var(--reading);color:var(--reading)}.haptics-toggle:disabled{color:var(--muted)}
+.recitation-alerts{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px}
+.alert-toggle{padding:8px 11px;min-height:34px;border:1px solid var(--edge);border-radius:20px;background:transparent;color:var(--ink);font-size:11px}.alert-toggle[aria-pressed="true"]{border-color:var(--reading);color:var(--reading)}.alert-toggle:disabled{color:var(--muted)}
 @keyframes feedback-in{from{opacity:0;translate:0 5px}to{opacity:1;translate:0 0}}
 @media(prefers-reduced-motion:reduce){.reading-feedback{animation:none}.qword.reading-current{transition:none}}
 .phonetic-finding .finding-explanation{margin:0;font-size:11px;line-height:1.6;color:var(--ink);overflow-wrap:anywhere}

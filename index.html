@@ -13,8 +13,8 @@
   <link rel="apple-touch-icon" sizes="180x180" href="./icons/apple-touch-icon.png">
   <title>Құран · Оқу және жаттау</title>
   <meta name="description" content="604 беттік Құран. Оқыңыз, жаттаңыз және оқуыңызды дауыспен тексеріңіз.">
-  <link rel="stylesheet" href="./styles.css?v=15c11438eb97">
-  <link rel="stylesheet" href="./ui.css?v=15c11438eb97">
+  <link rel="stylesheet" href="./styles.css?v=f01423c02eba">
+  <link rel="stylesheet" href="./ui.css?v=f01423c02eba">
 </head>
 <body>
   <div class="app">
@@ -73,7 +73,10 @@
     <div id="errorsPanel" class="errors-panel hidden" role="dialog" aria-modal="false" aria-label="Оқу нәтижесі">
       <div class="errors-head"><strong>Оқу нәтижесі</strong><button id="closeErrors" type="button" aria-label="Жабу">×</button></div>
       <div id="errorMessage" class="error-message">Оқуды бастағанда танылған мәтін осында шығады.</div>
-      <button id="hapticsToggle" class="haptics-toggle" type="button" aria-pressed="true">Діріл қосулы</button>
+      <div class="recitation-alerts">
+        <button id="soundToggle" class="alert-toggle" type="button" aria-pressed="true">Дыбыс қосулы</button>
+        <button id="hapticsToggle" class="alert-toggle" type="button" aria-pressed="true">Діріл қосулы</button>
+      </div>
       <div id="transcript" class="transcript" dir="rtl" lang="ar"></div>
       <div id="phoneticFindings" class="phonetic-findings hidden"></div>
       <p class="panel-note">Дауысты тану қателесуі мүмкін. Харакат пен тәжуид бұл режимде дәл тексерілмейді.</p>
@@ -86,7 +89,7 @@
       <button id="startAdvanced" class="advanced-start" type="button">Аятты оқуды бастау</button>
     </div>
   </div>
-  <script src="./config.js?v=15c11438eb97"></script>
-  <script type="module" src="./app.js?v=15c11438eb97"></script>
+  <script src="./config.js?v=f01423c02eba"></script>
+  <script type="module" src="./app.js?v=f01423c02eba"></script>
 </body>
 </html>

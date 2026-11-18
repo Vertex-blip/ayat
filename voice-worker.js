@@ -1,14 +1,20 @@
-import { pipeline, env } from './vendor/transformers.min.js';
-import { alignWords } from './lib/align.js';
-import { sequentialProgress, glyphsConfirmed } from './lib/progress.js';
-import { audioRms, decodeFloat32 } from './lib/audio.js';
+import { pipeline, env } from './vendor/transformers.min.js?v=f01423c02eba';
+import { alignWords } from './lib/align.js?v=f01423c02eba';
+import { sequentialProgress, glyphsConfirmed } from './lib/progress.js?v=f01423c02eba';
+import { audioRms, decodeFloat32 } from './lib/audio.js?v=f01423c02eba';
 
 // GitHub Pages cannot set cross-origin isolation headers. Use a single WASM
 // thread inside this worker so loading and inference do not block the reader.
 env.allowLocalModels = false;
 env.backends.onnx.wasm.numThreads = 1;
 env.backends.onnx.wasm.proxy = false;
-env.backends.onnx.wasm.wasmPaths = new URL('./vendor/', import.meta.url).href;
+const version = new URL(import.meta.url).searchParams.get('v');
+function wasmFile(extension) {
+  const url = new URL(`./vendor/ort-wasm-simd-threaded.jsep.${extension}`, import.meta.url);
+  if (version) url.searchParams.set('v', version);
+  return url.href;
+}
+env.backends.onnx.wasm.wasmPaths = { mjs: wasmFile('mjs'), wasm: wasmFile('wasm') };
 const modelId = 'eventhorizon0/tarteel-ai-onnx-whisper-base-ar-quran';
 let modelPromise;
 let busy = false;
